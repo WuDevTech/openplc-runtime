@@ -86,7 +86,7 @@ class SynchronizationManager:
 
         Sets up:
         - Filters readwrite nodes
-        - Initializes metadata cache for direct memory access
+        - Initializes metadata cache for direct memory access (including array elements)
 
         Returns:
             True if initialization successful
@@ -104,7 +104,16 @@ class SynchronizationManager:
 
             # Initialize metadata cache for direct memory access
             if self.variable_nodes:
-                var_indices = list(self.variable_nodes.keys())
+                # Collect all indices including array elements
+                var_indices = []
+                for var_index, var_node in self.variable_nodes.items():
+                    if var_node.array_length and var_node.array_length > 0:
+                        # For arrays, add all element indices
+                        for i in range(var_node.array_length):
+                            var_indices.append(var_index + i)
+                    else:
+                        var_indices.append(var_index)
+
                 self.variable_metadata = initialize_variable_cache(
                     self.buffer_accessor,
                     var_indices
@@ -112,7 +121,7 @@ class SynchronizationManager:
                 self._direct_memory_access_enabled = bool(self.variable_metadata)
 
                 if self._direct_memory_access_enabled:
-                    log_info("Direct memory access enabled")
+                    log_info(f"Direct memory access enabled for {len(self.variable_metadata)} indices")
                 else:
                     log_info("Using batch operations for sync")
 
@@ -184,7 +193,23 @@ class SynchronizationManager:
                     if actual_value is None:
                         continue
 
-                    # Convert to PLC format
+                    # Check if this is an array node
+                    if var_node.array_length and var_node.array_length > 0:
+                        # Handle array: value should be a list
+                        if isinstance(actual_value, (list, tuple)):
+                            for i, elem_value in enumerate(actual_value):
+                                elem_index = var_index + i
+                                plc_value = convert_value_for_plc(var_node.datatype, elem_value)
+
+                                # Check if element has changed
+                                if self._has_value_changed(elem_index, plc_value):
+                                    values_to_write.append(plc_value)
+                                    indices_to_write.append(elem_index)
+                                    self.opcua_value_cache[elem_index] = plc_value
+                                    log_debug(f"Array element {elem_index} changed: {plc_value}")
+                        continue
+
+                    # Handle scalar value
                     plc_value = convert_value_for_plc(var_node.datatype, actual_value)
 
                     # Check if value has changed
@@ -276,9 +301,14 @@ class SynchronizationManager:
 
         Args:
             var_node: The VariableNode to update
-            value: Raw value from PLC memory
+            value: Raw value from PLC memory (single value, not used for arrays)
         """
         try:
+            # Check if this is an array node
+            if var_node.array_length and var_node.array_length > 0:
+                await self._update_array_node(var_node)
+                return
+
             # Convert to OPC-UA format
             opcua_value = convert_value_for_opcua(var_node.datatype, value)
 
@@ -293,6 +323,74 @@ class SynchronizationManager:
 
         except Exception as e:
             log_error(f"Failed to update OPC-UA node {var_node.debug_var_index}: {e}")
+
+    async def _update_array_node(self, var_node: VariableNode) -> None:
+        """
+        Update an OPC-UA array node by reading all elements from PLC memory.
+
+        Arrays in PLC have consecutive indices starting from debug_var_index.
+
+        Args:
+            var_node: The VariableNode representing the array
+        """
+        try:
+            base_index = var_node.debug_var_index
+            array_length = var_node.array_length
+
+            # Read all array elements from PLC
+            element_indices = list(range(base_index, base_index + array_length))
+
+            # Try direct memory access first for array elements
+            array_values = []
+            if self._direct_memory_access_enabled:
+                for idx in element_indices:
+                    metadata = self.variable_metadata.get(idx)
+                    if metadata:
+                        raw_value = read_memory_direct(metadata.address, metadata.size)
+                        opcua_value = convert_value_for_opcua(var_node.datatype, raw_value)
+                        array_values.append(opcua_value)
+                    else:
+                        # Fallback: read via buffer accessor
+                        val, msg = self.buffer_accessor.get_var_value(idx)
+                        if msg == "Success" and val is not None:
+                            opcua_value = convert_value_for_opcua(var_node.datatype, val)
+                            array_values.append(opcua_value)
+                        else:
+                            # Use default value
+                            array_values.append(self._get_default_value(var_node.datatype))
+            else:
+                # Use batch operation
+                results = self.buffer_accessor.get_var_values_batch(element_indices)
+                for val, msg in results:
+                    if msg == "Success" and val is not None:
+                        opcua_value = convert_value_for_opcua(var_node.datatype, val)
+                        array_values.append(opcua_value)
+                    else:
+                        array_values.append(self._get_default_value(var_node.datatype))
+
+            # Get expected OPC-UA type
+            expected_type = map_plc_to_opcua_type(var_node.datatype)
+
+            # Create array Variant
+            variant = ua.Variant(array_values, expected_type)
+
+            # Write to node
+            await var_node.node.write_value(variant)
+
+        except Exception as e:
+            log_error(f"Failed to update array node {var_node.debug_var_index}: {e}")
+
+    def _get_default_value(self, datatype: str) -> Any:
+        """Get default value for a datatype."""
+        dtype = datatype.upper()
+        if dtype == "BOOL":
+            return False
+        elif dtype in ["FLOAT", "REAL"]:
+            return 0.0
+        elif dtype == "STRING":
+            return ""
+        else:
+            return 0
 
     async def _write_to_plc_batch(
         self,

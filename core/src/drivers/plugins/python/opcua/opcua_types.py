@@ -14,6 +14,7 @@ class VariableNode:
     access_mode: str
     is_array_element: bool = False
     array_index: Optional[int] = None
+    array_length: Optional[int] = None  # Length of array (for array nodes only)
 
 
 @dataclass

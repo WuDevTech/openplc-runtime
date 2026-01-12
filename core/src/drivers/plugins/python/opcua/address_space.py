@@ -309,6 +309,18 @@ class AddressSpaceBuilder:
             datatype=opcua_type
         )
 
+        # Set array dimensions - critical for OPC-UA clients to recognize this as an array
+        # ValueRank = 1 means OneDimension (one-dimensional array)
+        # ArrayDimensions specifies the size of each dimension
+        await node.write_attribute(
+            ua.AttributeIds.ValueRank,
+            ua.DataValue(ua.Variant(1, ua.VariantType.Int32))
+        )
+        await node.write_attribute(
+            ua.AttributeIds.ArrayDimensions,
+            ua.DataValue(ua.Variant([arr.length], ua.VariantType.UInt32))
+        )
+
         # Set display name
         await node.write_attribute(
             ua.AttributeIds.DisplayName,
@@ -330,7 +342,8 @@ class AddressSpaceBuilder:
             debug_var_index=arr.index,
             datatype=arr.datatype,
             access_mode=access_mode,
-            is_array_element=False
+            is_array_element=False,
+            array_length=arr.length
         )
 
         self.variable_nodes[arr.index] = var_node

@@ -65,6 +65,11 @@ class TestMapPlcToOpcuaType:
         assert map_plc_to_opcua_type("FLOAT") == ua.VariantType.Float
         assert map_plc_to_opcua_type("float") == ua.VariantType.Float
 
+    def test_real_mapping(self):
+        """REAL should map to Float (IEC 61131-3 REAL = 32-bit float)."""
+        assert map_plc_to_opcua_type("REAL") == ua.VariantType.Float
+        assert map_plc_to_opcua_type("real") == ua.VariantType.Float
+
     def test_string_mapping(self):
         """STRING should map to String."""
         assert map_plc_to_opcua_type("STRING") == ua.VariantType.String
@@ -172,6 +177,19 @@ class TestConvertValueForOpcua:
         result = convert_value_for_opcua("FLOAT", -273.15)
         assert abs(result - (-273.15)) < 0.01
 
+    # REAL conversions (IEC 61131-3 REAL = 32-bit float)
+    def test_real_from_float(self):
+        """REAL values should pass through as float."""
+        result = convert_value_for_opcua("REAL", 3.14159)
+        assert abs(result - 3.14159) < 0.0001
+
+    def test_real_from_int_representation(self):
+        """REAL stored as int representation should be unpacked."""
+        # Pack 3.14159 as int representation
+        int_repr = struct.unpack('I', struct.pack('f', 3.14159))[0]
+        result = convert_value_for_opcua("REAL", int_repr)
+        assert abs(result - 3.14159) < 0.0001
+
     # STRING conversions
     def test_string_normal(self):
         """String values should pass through."""
@@ -255,6 +273,14 @@ class TestConvertValueForPlc:
         result = convert_value_for_plc("FLOAT", 0.0)
         unpacked = struct.unpack('f', struct.pack('I', result))[0]
         assert unpacked == 0.0
+
+    # REAL conversions (IEC 61131-3 REAL = 32-bit float)
+    def test_real_to_int_representation(self):
+        """REAL should be packed to int representation for PLC storage."""
+        result = convert_value_for_plc("REAL", 3.14159)
+        # Verify by unpacking back
+        unpacked = struct.unpack('f', struct.pack('I', result))[0]
+        assert abs(unpacked - 3.14159) < 0.0001
 
     # STRING conversions
     def test_string_normal(self):
@@ -343,6 +369,19 @@ class TestRoundTripConversions:
             opcua_val = convert_value_for_opcua("FLOAT", int_repr)
             # Convert back to PLC
             plc_val = convert_value_for_plc("FLOAT", opcua_val)
+            # Unpack and compare
+            result = struct.unpack('f', struct.pack('I', plc_val))[0]
+            assert abs(result - val) < 0.0001
+
+    def test_real_roundtrip(self):
+        """REAL values should survive round-trip conversion (same as FLOAT)."""
+        for val in [0.0, 3.14159, -273.15, 1000000.5]:
+            # First convert float to int representation (as stored in PLC)
+            int_repr = struct.unpack('I', struct.pack('f', val))[0]
+            # Convert to OPC-UA
+            opcua_val = convert_value_for_opcua("REAL", int_repr)
+            # Convert back to PLC
+            plc_val = convert_value_for_plc("REAL", opcua_val)
             # Unpack and compare
             result = struct.unpack('f', struct.pack('I', plc_val))[0]
             assert abs(result - val) < 0.0001

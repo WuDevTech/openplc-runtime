@@ -29,6 +29,7 @@ def map_plc_to_opcua_type(plc_type: str) -> ua.VariantType:
         "DINT": ua.VariantType.Int32,
         "LINT": ua.VariantType.Int64,
         "FLOAT": ua.VariantType.Float,
+        "REAL": ua.VariantType.Float,  # IEC 61131-3 REAL = 32-bit float
         "STRING": ua.VariantType.String,
     }
     mapped_type = type_mapping.get(plc_type.upper(), ua.VariantType.Variant)
@@ -66,8 +67,8 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
         elif datatype.upper() in ["LINT", "Lint"]:
             return int(value)  # int64
         
-        elif datatype.upper() in ["FLOAT", "Float"]:
-            # Float values are stored as integers in debug variables
+        elif datatype.upper() in ["FLOAT", "REAL"]:
+            # Float/Real values are stored as integers in debug variables
             # Convert back to float if it's an integer representation
             if isinstance(value, int):
                 try:
@@ -85,11 +86,11 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
     except (ValueError, TypeError, OverflowError) as e:
         # If conversion fails, return a safe default
         log_warn(f"Failed to convert value {value} to OPC-UA format for {datatype}: {e}")
-        if datatype.upper() in ["BOOL", "Bool"]:
+        if datatype.upper() == "BOOL":
             return False
-        elif datatype.upper() in ["FLOAT", "Float"]:
+        elif datatype.upper() in ["FLOAT", "REAL"]:
             return 0.0
-        elif datatype.upper() in ["STRING", "String"]:
+        elif datatype.upper() == "STRING":
             return ""
         else:
             return 0
@@ -127,7 +128,7 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
         elif datatype.upper() in ["LINT", "Lint"]:
             return int(value)  # int64
         
-        elif datatype.upper() in ["FLOAT", "Float"]:
+        elif datatype.upper() in ["FLOAT", "REAL"]:
             # Convert float to int representation for storage
             if isinstance(value, float):
                 try:
@@ -147,11 +148,11 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
     except (ValueError, TypeError, OverflowError) as e:
         # If conversion fails, log and return a safe default
         log_warn(f"Failed to convert value {value} to {datatype}, using default: {e}")
-        if datatype.upper() in ["BOOL", "Bool"]:
+        if datatype.upper() == "BOOL":
             return 0
-        elif datatype.upper() in ["FLOAT", "Float"]:
+        elif datatype.upper() in ["FLOAT", "REAL"]:
             return 0
-        elif datatype.upper() in ["STRING", "String"]:
+        elif datatype.upper() == "STRING":
             return ""
         else:
             return 0

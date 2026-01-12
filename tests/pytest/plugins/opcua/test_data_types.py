@@ -424,6 +424,7 @@ class TestTypeMapping:
         ("INT32", ua.VariantType.Int32),
         ("LINT", ua.VariantType.Int64),
         ("FLOAT", ua.VariantType.Float),
+        ("REAL", ua.VariantType.Float),
         ("STRING", ua.VariantType.String),
     ])
     def test_type_mapping(self, plc_type, expected_opcua_type):
