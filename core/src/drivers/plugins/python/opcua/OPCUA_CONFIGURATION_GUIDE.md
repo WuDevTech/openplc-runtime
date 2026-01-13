@@ -269,7 +269,6 @@ The `config.address_space` section defines what PLC data is exposed to OPC-UA cl
 ```json
 "address_space": {
   "namespace_uri": "urn:openplc:opcua:datatype:test",
-  "namespace_index": 2,
   "variables": [ ... ],
   "structures": [ ... ],
   "arrays": [ ... ]
@@ -278,8 +277,7 @@ The `config.address_space` section defines what PLC data is exposed to OPC-UA cl
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `namespace_uri` | string | Unique URI for this address space. Clients use this to identify your variables. |
-| `namespace_index` | integer | OPC-UA namespace index (typically `2` for custom namespaces; `0` and `1` are reserved). |
+| `namespace_uri` | string | Unique URI for this address space. Clients use this to identify your variables. The namespace index is assigned automatically by the server. |
 | `variables` | array | Simple scalar variables. |
 | `structures` | array | Grouped variables (like PLC structs). |
 | `arrays` | array | Array variables with multiple elements. |
@@ -509,7 +507,6 @@ Here's a minimal but complete configuration:
       "cycle_time_ms": 100,
       "address_space": {
         "namespace_uri": "urn:mycompany:plc:variables",
-        "namespace_index": 2,
         "variables": [
           {
             "node_id": "PLC.Motor.Speed",
