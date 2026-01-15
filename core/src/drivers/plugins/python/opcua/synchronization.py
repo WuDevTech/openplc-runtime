@@ -93,6 +93,9 @@ class SynchronizationManager:
         # Cycle timestamp for subscription notifications
         self._cycle_timestamp: Optional[datetime] = None
 
+        # Track if we've logged the "no PLC" warning to avoid log spam
+        self._logged_no_plc_warning: bool = False
+
     async def initialize(self) -> bool:
         """
         Initialize the synchronization manager.
@@ -144,6 +147,42 @@ class SynchronizationManager:
             log_error(f"Failed to initialize sync manager: {e}")
             return False
 
+    async def _reinitialize_metadata(self) -> None:
+        """
+        Reinitialize metadata cache when PLC program becomes available.
+
+        Called when transitioning from no-PLC to PLC-loaded state.
+        """
+        try:
+            if not self.variable_nodes:
+                return
+
+            # Collect all indices including array elements
+            var_indices = []
+            for var_index, var_node in self.variable_nodes.items():
+                if var_node.array_length and var_node.array_length > 0:
+                    for i in range(var_node.array_length):
+                        var_indices.append(var_index + i)
+                else:
+                    var_indices.append(var_index)
+
+            self.variable_metadata = initialize_variable_cache(
+                self.buffer_accessor,
+                var_indices
+            )
+            self._direct_memory_access_enabled = bool(self.variable_metadata)
+
+            if self._direct_memory_access_enabled:
+                log_info(f"Direct memory access enabled for {len(self.variable_metadata)} indices")
+            else:
+                log_info("Using batch operations for sync")
+
+            # Clear value cache to force full sync on next cycle
+            self.opcua_value_cache.clear()
+
+        except Exception as e:
+            log_error(f"Failed to reinitialize metadata: {e}")
+
     async def run(
         self,
         is_running: Callable[[], bool],
@@ -164,6 +203,24 @@ class SynchronizationManager:
 
         while is_running():
             try:
+                # Check if PLC program is loaded by checking variable count
+                # When no program is loaded, get_var_count returns 0
+                var_count, _ = self.buffer_accessor.get_var_count()
+                if var_count == 0:
+                    # No PLC program loaded, skip syncing
+                    if not self._logged_no_plc_warning:
+                        log_info("No PLC program loaded, sync paused (waiting for program)")
+                        self._logged_no_plc_warning = True
+                    await asyncio.sleep(cycle_time_seconds)
+                    continue
+
+                # Reset warning flag when PLC is loaded
+                if self._logged_no_plc_warning:
+                    log_info("PLC program detected, resuming sync")
+                    self._logged_no_plc_warning = False
+                    # Re-initialize metadata cache now that PLC is loaded
+                    await self._reinitialize_metadata()
+
                 # Capture cycle timestamp for subscription notifications
                 self._cycle_timestamp = datetime.now(timezone.utc)
 
@@ -295,11 +352,17 @@ class SynchronizationManager:
         # Single batch call for all values
         results, msg = self.buffer_accessor.get_var_values_batch(var_indices)
 
-        if msg != "Success":
+        # Check for actual errors (exceptions during batch operation)
+        # "Batch read completed" is the success message, not "Success"
+        if "Exception" in msg or "Error" in msg:
             log_error(f"Batch read failed: {msg}")
             return
 
-        # Process results
+        # If no results returned, nothing to do (may happen when no PLC is loaded)
+        if not results:
+            return
+
+        # Process results - individual items may have failed (e.g., no PLC loaded)
         for i, (value, var_msg) in enumerate(results):
             var_index = var_indices[i]
             var_node = self.variable_nodes.get(var_index)
