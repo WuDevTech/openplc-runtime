@@ -13,20 +13,50 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 
+def _is_docker_interface(interface_name: str) -> bool:
+    """Check if interface name looks like a Docker/container internal interface."""
+    docker_prefixes = ('docker', 'br-', 'veth', 'cni', 'flannel', 'cali', 'weave')
+    return interface_name.lower().startswith(docker_prefixes)
+
+
+def _is_docker_ip(ip: str) -> bool:
+    """
+    Check if IP is in a Docker internal network range.
+
+    Docker typically uses:
+    - 172.17.0.0/16 for default bridge
+    - 172.18-31.0.0/16 for user-defined networks
+    - We filter the entire 172.16.0.0/12 range (172.16.x.x - 172.31.x.x)
+    """
+    if ip.startswith('172.'):
+        try:
+            second_octet = int(ip.split('.')[1])
+            # 172.16.0.0/12 covers 172.16.x.x through 172.31.x.x
+            if 16 <= second_octet <= 31:
+                return True
+        except (ValueError, IndexError):
+            pass
+    return False
+
+
 def _get_ips_from_psutil() -> List[str]:
-    """Get non-loopback IPs using psutil (preferred method)."""
+    """Get non-loopback, non-Docker IPs using psutil (preferred method)."""
     if not PSUTIL_AVAILABLE:
         return []
 
     try:
         non_loopback_ips = []
         for interface_name, addresses in psutil.net_if_addrs().items():
+            # Skip Docker/container internal interfaces by name
+            if _is_docker_interface(interface_name):
+                continue
+
             for addr in addresses:
                 # Only consider IPv4 addresses
                 if addr.family == socket.AF_INET:
                     ip = addr.address
-                    # Skip loopback addresses
-                    if not ip.startswith('127.'):
+                    # Skip loopback and Docker IP ranges
+                    if not ip.startswith('127.') and not _is_docker_ip(ip):
                         non_loopback_ips.append(ip)
         return non_loopback_ips
     except Exception:
@@ -35,7 +65,7 @@ def _get_ips_from_psutil() -> List[str]:
 
 def _get_ips_from_socket() -> List[str]:
     """
-    Get non-loopback IPs using socket (fallback, no network access required).
+    Get non-loopback, non-Docker IPs using socket (fallback, no network access required).
 
     Uses gethostbyname_ex and getaddrinfo to enumerate IPs associated
     with the machine's hostname. Works on Windows MSYS2 and air-gapped systems.
@@ -47,7 +77,9 @@ def _get_ips_from_socket() -> List[str]:
         hostname = socket.gethostname()
         _, _, ip_list = socket.gethostbyname_ex(hostname)
         for ip in ip_list:
-            if not ip.startswith('127.') and ip not in non_loopback_ips:
+            if (not ip.startswith('127.') and
+                not _is_docker_ip(ip) and
+                ip not in non_loopback_ips):
                 non_loopback_ips.append(ip)
     except Exception:
         pass
@@ -57,7 +89,9 @@ def _get_ips_from_socket() -> List[str]:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
             ip = info[4][0]
-            if not ip.startswith('127.') and ip not in non_loopback_ips:
+            if (not ip.startswith('127.') and
+                not _is_docker_ip(ip) and
+                ip not in non_loopback_ips):
                 non_loopback_ips.append(ip)
     except Exception:
         pass
@@ -78,7 +112,7 @@ def _get_ip_from_external_connection() -> Optional[str]:
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
         s.close()
-        if not ip.startswith('127.'):
+        if not ip.startswith('127.') and not _is_docker_ip(ip):
             return ip
     except Exception:
         pass
