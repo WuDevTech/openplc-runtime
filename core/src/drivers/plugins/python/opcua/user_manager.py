@@ -10,7 +10,7 @@ import hashlib
 import os
 import sys
 from types import SimpleNamespace
-from typing import Dict, Optional, Any
+from typing import Optional, Any
 
 from asyncua.server.user_managers import UserManager, UserRole
 
@@ -82,15 +82,12 @@ class OpenPLCUserManager(UserManager):
             if user.type == "certificate"
         }
 
-        # Build security policy URI mapping
-        self._policy_uri_mapping = self._build_policy_uri_mapping()
-
         log_info(f"UserManager initialized: {len(self.users)} password users, "
                  f"{len(self.cert_users)} certificate users")
 
     def get_user(
         self,
-        isession,
+        iserver,
         username: Optional[str] = None,
         password: Optional[str] = None,
         certificate: Optional[Any] = None
@@ -98,8 +95,12 @@ class OpenPLCUserManager(UserManager):
         """
         Authenticate user with security profile enforcement.
 
+        Note: asyncua passes InternalServer as the first argument, not a session.
+        The security policy URI is not available at this level, so we select
+        the security profile based on the authentication method being used.
+
         Args:
-            isession: The internal session object
+            iserver: The internal server object (passed by asyncua)
             username: Username for password authentication
             password: Password for password authentication
             certificate: Certificate for certificate authentication
@@ -107,40 +108,20 @@ class OpenPLCUserManager(UserManager):
         Returns:
             User object with role attribute, or None if authentication fails
         """
-        # Detect authentication method first
+        # Detect authentication method from provided credentials
         auth_method = self._detect_auth_method(username, password, certificate)
-        log_info(f"Authentication attempt detected: method={auth_method}")
+        log_info(f"Authentication attempt: method={auth_method}")
 
-        # Try to resolve the profile normally
-        profile = self._get_profile_for_session(isession)
+        # Find a security profile that supports this authentication method
+        profile = self._find_profile_by_auth_method(auth_method)
 
-        # FALLBACK: if cannot resolve profile, try to find one that supports the auth method
         if not profile:
-            policy_uri = getattr(isession, 'security_policy_uri', None)
-            log_warn(
-                f"No security profile mapped for session (policy_uri={policy_uri}). "
-                f"Attempting fallback using auth method: {auth_method}"
-            )
-
-            # Try to find a profile that supports this authentication method
-            profile = self._find_profile_by_auth_method(auth_method)
-
-            if profile:
-                log_info(f"Using fallback security profile: '{profile.name}' (supports {auth_method})")
-            else:
-                log_error(
-                    f"No security profile found that supports authentication method '{auth_method}'. "
-                    f"Session policy URI: {policy_uri}"
-                )
-                return None
-
-        # Validate that the profile supports the authentication method
-        if auth_method not in profile.auth_methods:
             log_error(
-                f"Authentication method '{auth_method}' not allowed for security profile "
-                f"'{profile.name}'. Allowed methods: {profile.auth_methods}"
+                f"No security profile found that supports authentication method '{auth_method}'"
             )
             return None
+
+        log_info(f"Using security profile '{profile.name}' for {auth_method} authentication")
 
         # Authenticate based on method
         user = None
@@ -264,89 +245,6 @@ class OpenPLCUserManager(UserManager):
 
         return None
 
-    def _build_policy_uri_mapping(self) -> Dict[str, str]:
-        """
-        Build mapping from OPC-UA security policy URIs to profile names.
-
-        Returns:
-            Dict mapping policy URI to profile name
-        """
-        uri_mapping = {}
-
-        for profile in self.config.server.security_profiles:
-            if not profile.enabled:
-                continue
-
-            # Map config policy+mode to standard OPC-UA URI
-            policy_uri = self._get_standard_policy_uri(
-                profile.security_policy,
-                profile.security_mode
-            )
-            if policy_uri:
-                uri_mapping[policy_uri] = profile.name
-
-        log_info(f"Built security policy URI mapping: {uri_mapping}")
-        return uri_mapping
-
-    def _get_standard_policy_uri(
-        self,
-        security_policy: str,
-        security_mode: str
-    ) -> Optional[str]:
-        """
-        Get standard OPC-UA security policy URI for config values.
-
-        Args:
-            security_policy: Policy name from config
-            security_mode: Mode name from config
-
-        Returns:
-            Standard OPC-UA policy URI or None
-        """
-        if security_policy == "None" and security_mode == "None":
-            return "http://opcfoundation.org/UA/SecurityPolicy#None"
-        elif security_policy == "Basic256Sha256":
-            return "http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256"
-        elif security_policy == "Aes128_Sha256_RsaOaep":
-            return "http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep"
-        elif security_policy == "Aes256_Sha256_RsaPss":
-            return "http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss"
-        else:
-            log_warn(f"Unknown security policy: {security_policy}")
-            return None
-
-    def _get_profile_for_session(self, isession) -> Optional[Any]:
-        """
-        Get security profile for the session based on its security policy URI.
-
-        Args:
-            isession: The internal session object
-
-        Returns:
-            Security profile object or None
-        """
-        try:
-            policy_uri = getattr(isession, 'security_policy_uri', None)
-            if not policy_uri:
-                log_warn("Session has no security_policy_uri attribute")
-                return None
-
-            profile_name = self._policy_uri_mapping.get(policy_uri)
-            if not profile_name:
-                log_warn(f"No profile mapping found for policy URI: {policy_uri}")
-                return None
-
-            # Find the profile object
-            for profile in self.config.server.security_profiles:
-                if profile.name == profile_name and profile.enabled:
-                    return profile
-
-            log_error(f"Profile '{profile_name}' not found or disabled in configuration")
-            return None
-        except Exception as e:
-            log_error(f"Failed to resolve security profile for session: {e}")
-            return None
-
     def _cert_to_fingerprint(self, certificate: Any) -> Optional[str]:
         """
         Convert certificate object to SHA256 fingerprint.
@@ -424,6 +322,15 @@ class OpenPLCUserManager(UserManager):
         """
         Detect which authentication method is being used.
 
+        Priority order:
+        1. Username/Password - explicit user credentials take precedence
+        2. Certificate - used when no credentials provided but cert present
+        3. Anonymous - fallback when nothing provided
+
+        Note: Certificate is always present on secure connections (TLS), so we must
+        check for username/password first to avoid incorrectly detecting certificate
+        auth when the user intended to use credentials.
+
         Args:
             username: Username if provided
             password: Password if provided
@@ -432,10 +339,10 @@ class OpenPLCUserManager(UserManager):
         Returns:
             Authentication method: "Certificate", "Username", or "Anonymous"
         """
-        if certificate:
-            return "Certificate"
-        elif username and password:
+        if username and password:
             return "Username"
+        elif certificate:
+            return "Certificate"
         else:
             return "Anonymous"
 
