@@ -9,10 +9,11 @@ from pymodbus.client import ModbusTcpClient
 class ModbusConnectionManager:  # pylint: disable=too-many-instance-attributes
     """Manages Modbus TCP connections with retry logic."""
 
-    def __init__(self, host: str, port: int, timeout_ms: int):
+    def __init__(self, host: str, port: int, timeout_ms: int, slave_id: int = 1):
         self.host = host
         self.port = port
         self.timeout = timeout_ms / 1000.0  # Convert to seconds
+        self.slave_id = slave_id  # Unit/Slave ID for Modbus TCP gateways
 
         # Retry configuration
         self.retry_delay_base = 2.0  # initial delay between attempts (seconds)

@@ -73,6 +73,7 @@ class ModbusDeviceConfig:
         self.host: str = "127.0.0.1"
         self.port: int = 502
         self.timeout_ms: int = 1000
+        self.slave_id: int = 1  # Unit/Slave ID for Modbus TCP gateways (0-255)
         self.io_points: List['ModbusIoPointConfig'] = []
 
     @classmethod
@@ -89,6 +90,7 @@ class ModbusDeviceConfig:
         device.host = config.get("host", "127.0.0.1")
         device.port = config.get("port", 502)
         device.timeout_ms = config.get("timeout_ms", 1000)
+        device.slave_id = config.get("slave_id", 1)
 
         # Parse I/O points
         io_points_data = config.get("io_points", [])
@@ -110,6 +112,8 @@ class ModbusDeviceConfig:
             raise ValueError(f"Invalid port: {self.port}. Must be a positive integer for device {self.name}.")
         if not isinstance(self.timeout_ms, int) or self.timeout_ms <= 0:
             raise ValueError(f"Invalid timeout_ms: {self.timeout_ms}. Must be a positive integer for device {self.name}.")
+        if not isinstance(self.slave_id, int) or not (0 <= self.slave_id <= 255):
+            raise ValueError(f"Invalid slave_id: {self.slave_id}. Must be an integer between 0 and 255 for device {self.name}.")
 
         for i, point in enumerate(self.io_points):
             if not isinstance(point, ModbusIoPointConfig):
@@ -126,7 +130,7 @@ class ModbusDeviceConfig:
                 raise ValueError(f"Invalid cycle_time_ms: {point.cycle_time_ms}. Must be a positive integer for device {self.name}, point {i}.")
 
     def __repr__(self) -> str:
-        return f"ModbusDeviceConfig(name='{self.name}', host='{self.host}', port={self.port}, io_points={len(self.io_points)})"
+        return f"ModbusDeviceConfig(name='{self.name}', host='{self.host}', port={self.port}, slave_id={self.slave_id}, io_points={len(self.io_points)})"
 
 class ModbusMasterConfig(PluginConfigContract):
     """
