@@ -19,11 +19,16 @@ sys.path.insert(0, str(_plugin_dir / "opcua"))
 
 from opcua_memory import (
     IEC_STRING,
+    IEC_TIMESPEC,
     STR_MAX_LEN,
     STRING_TOTAL_SIZE,
+    TIMESPEC_SIZE,
+    TIME_DATATYPES,
     read_memory_direct,
     read_string_direct,
     write_string_direct,
+    read_timespec_direct,
+    write_timespec_direct,
 )
 
 
@@ -258,3 +263,207 @@ class TestReadMemoryDirectNumeric:
         with pytest.raises(RuntimeError) as exc_info:
             read_memory_direct(address, 16)
         assert "Unsupported variable size" in str(exc_info.value)
+
+
+class TestIECTimespecStructure:
+    """Tests for the IEC_TIMESPEC ctypes structure."""
+
+    def test_structure_size(self):
+        """IEC_TIMESPEC should be 8 bytes (2 x int32)."""
+        assert ctypes.sizeof(IEC_TIMESPEC) == TIMESPEC_SIZE
+        assert ctypes.sizeof(IEC_TIMESPEC) == 8
+
+    def test_timespec_size_constant(self):
+        """TIMESPEC_SIZE should be 8."""
+        assert TIMESPEC_SIZE == 8
+
+    def test_structure_fields(self):
+        """IEC_TIMESPEC should have tv_sec and tv_nsec fields."""
+        timespec = IEC_TIMESPEC()
+        assert hasattr(timespec, 'tv_sec')
+        assert hasattr(timespec, 'tv_nsec')
+
+    def test_structure_initialization(self):
+        """IEC_TIMESPEC should initialize with zeros."""
+        timespec = IEC_TIMESPEC()
+        assert timespec.tv_sec == 0
+        assert timespec.tv_nsec == 0
+
+    def test_structure_tv_sec_field(self):
+        """tv_sec field should accept int32 values."""
+        timespec = IEC_TIMESPEC()
+        timespec.tv_sec = 3600
+        assert timespec.tv_sec == 3600
+
+        timespec.tv_sec = -100
+        assert timespec.tv_sec == -100
+
+    def test_structure_tv_nsec_field(self):
+        """tv_nsec field should accept int32 values."""
+        timespec = IEC_TIMESPEC()
+        timespec.tv_nsec = 500_000_000
+        assert timespec.tv_nsec == 500_000_000
+
+
+class TestReadTimespecDirect:
+    """Tests for read_timespec_direct function."""
+
+    def _create_timespec_in_memory(self, tv_sec: int, tv_nsec: int) -> tuple:
+        """
+        Create an IEC_TIMESPEC in memory and return (address, struct).
+        """
+        timespec = IEC_TIMESPEC()
+        timespec.tv_sec = tv_sec
+        timespec.tv_nsec = tv_nsec
+        address = ctypes.addressof(timespec)
+        return address, timespec
+
+    def test_read_zero_time(self):
+        """Should read zero time correctly."""
+        address, timespec = self._create_timespec_in_memory(0, 0)
+        result = read_timespec_direct(address)
+        assert result == (0, 0)
+
+    def test_read_seconds_only(self):
+        """Should read time with only seconds."""
+        address, timespec = self._create_timespec_in_memory(100, 0)
+        result = read_timespec_direct(address)
+        assert result == (100, 0)
+
+    def test_read_with_nanoseconds(self):
+        """Should read time with nanoseconds."""
+        address, timespec = self._create_timespec_in_memory(1, 500_000_000)
+        result = read_timespec_direct(address)
+        assert result == (1, 500_000_000)
+
+    def test_read_large_time(self):
+        """Should read large time values (hours/days)."""
+        # 24 hours
+        address, timespec = self._create_timespec_in_memory(86400, 0)
+        result = read_timespec_direct(address)
+        assert result == (86400, 0)
+
+    def test_read_negative_seconds(self):
+        """Should handle negative seconds (for negative time intervals)."""
+        address, timespec = self._create_timespec_in_memory(-10, 0)
+        result = read_timespec_direct(address)
+        assert result == (-10, 0)
+
+
+class TestWriteTimespecDirect:
+    """Tests for write_timespec_direct function."""
+
+    def _create_empty_timespec(self) -> tuple:
+        """Create an empty IEC_TIMESPEC and return (address, struct)."""
+        timespec = IEC_TIMESPEC()
+        address = ctypes.addressof(timespec)
+        return address, timespec
+
+    def test_write_zero_time(self):
+        """Should write zero time correctly."""
+        address, timespec = self._create_empty_timespec()
+        result = write_timespec_direct(address, 0, 0)
+        assert result is True
+        assert timespec.tv_sec == 0
+        assert timespec.tv_nsec == 0
+
+    def test_write_seconds_only(self):
+        """Should write time with only seconds."""
+        address, timespec = self._create_empty_timespec()
+        result = write_timespec_direct(address, 100, 0)
+        assert result is True
+        assert timespec.tv_sec == 100
+        assert timespec.tv_nsec == 0
+
+    def test_write_with_nanoseconds(self):
+        """Should write time with nanoseconds."""
+        address, timespec = self._create_empty_timespec()
+        result = write_timespec_direct(address, 1, 500_000_000)
+        assert result is True
+        assert timespec.tv_sec == 1
+        assert timespec.tv_nsec == 500_000_000
+
+    def test_write_large_time(self):
+        """Should write large time values."""
+        address, timespec = self._create_empty_timespec()
+        result = write_timespec_direct(address, 86400, 999_000_000)
+        assert result is True
+        assert timespec.tv_sec == 86400
+        assert timespec.tv_nsec == 999_000_000
+
+    def test_write_then_read_roundtrip(self):
+        """Should support write then read roundtrip."""
+        address, timespec = self._create_empty_timespec()
+
+        write_timespec_direct(address, 3600, 250_000_000)
+        result = read_timespec_direct(address)
+
+        assert result == (3600, 250_000_000)
+
+
+class TestReadMemoryDirectWithTimeDatatype:
+    """Tests for read_memory_direct with TIME datatype hint."""
+
+    def _create_timespec_in_memory(self, tv_sec: int, tv_nsec: int) -> tuple:
+        """Create an IEC_TIMESPEC in memory."""
+        timespec = IEC_TIMESPEC()
+        timespec.tv_sec = tv_sec
+        timespec.tv_nsec = tv_nsec
+        address = ctypes.addressof(timespec)
+        return address, timespec
+
+    def test_read_memory_direct_time_with_datatype(self):
+        """read_memory_direct should return tuple for TIME datatype."""
+        address, timespec = self._create_timespec_in_memory(10, 500_000_000)
+        result = read_memory_direct(address, 8, datatype="TIME")
+        assert result == (10, 500_000_000)
+
+    def test_read_memory_direct_tod_with_datatype(self):
+        """read_memory_direct should return tuple for TOD datatype."""
+        address, timespec = self._create_timespec_in_memory(3600, 0)
+        result = read_memory_direct(address, 8, datatype="TOD")
+        assert result == (3600, 0)
+
+    def test_read_memory_direct_date_with_datatype(self):
+        """read_memory_direct should return tuple for DATE datatype."""
+        address, timespec = self._create_timespec_in_memory(86400, 0)
+        result = read_memory_direct(address, 8, datatype="DATE")
+        assert result == (86400, 0)
+
+    def test_read_memory_direct_dt_with_datatype(self):
+        """read_memory_direct should return tuple for DT datatype."""
+        address, timespec = self._create_timespec_in_memory(1000000, 123_000_000)
+        result = read_memory_direct(address, 8, datatype="DT")
+        assert result == (1000000, 123_000_000)
+
+    def test_read_memory_direct_8bytes_without_datatype(self):
+        """read_memory_direct should return uint64 for 8 bytes without datatype hint."""
+        value = ctypes.c_uint64(1000000000)
+        address = ctypes.addressof(value)
+        result = read_memory_direct(address, 8)
+        assert result == 1000000000
+        assert isinstance(result, int)
+
+    def test_read_memory_direct_time_case_insensitive(self):
+        """read_memory_direct should handle case-insensitive datatype."""
+        address, timespec = self._create_timespec_in_memory(5, 100_000_000)
+        result = read_memory_direct(address, 8, datatype="time")
+        assert result == (5, 100_000_000)
+
+        result = read_memory_direct(address, 8, datatype="Time")
+        assert result == (5, 100_000_000)
+
+
+class TestTimeDatatypesConstantMemory:
+    """Tests for TIME_DATATYPES constant in memory module."""
+
+    def test_time_datatypes_contains_all_time_types(self):
+        """TIME_DATATYPES should contain all time-related types."""
+        assert "TIME" in TIME_DATATYPES
+        assert "DATE" in TIME_DATATYPES
+        assert "TOD" in TIME_DATATYPES
+        assert "DT" in TIME_DATATYPES
+
+    def test_time_datatypes_is_frozen(self):
+        """TIME_DATATYPES should be immutable."""
+        assert isinstance(TIME_DATATYPES, frozenset)
