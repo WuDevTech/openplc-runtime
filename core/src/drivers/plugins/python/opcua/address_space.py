@@ -312,7 +312,8 @@ class AddressSpaceBuilder:
 
             log_info(f"Created field {field_node_id} (index: {field.index})")
         else:
-            log_warn(f"Field {field_node_id} has no index - skipping node mapping")
+            # Complex types (FBs, nested structs) have null indices - only leaf fields have indices
+            log_info(f"Field {field_node_id} is a complex type (no index) - skipping node mapping")
 
     async def _create_array(
         self,
