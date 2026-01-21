@@ -166,7 +166,7 @@
             "display_name": "Time of Day",
             "datatype": "TOD",
             "initial_value": 0,
-            "description": "Current time of day (TOD type, milliseconds since midnight)",
+            "description": "Current time of day (TOD type, mapped to OPC-UA DateTime)",
             "index": 8,
             "permissions": {"viewer": "r", "operator": "r", "engineer": "rw"}
           }
