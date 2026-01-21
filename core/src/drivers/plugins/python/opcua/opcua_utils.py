@@ -59,7 +59,7 @@ def timespec_to_milliseconds(tv_sec: int, tv_nsec: int) -> int:
     return (tv_sec * 1000) + (tv_nsec // 1_000_000)
 
 
-def milliseconds_to_timespec(ms: int) -> tuple:
+def milliseconds_to_timespec(ms: int) -> tuple[int, int]:
     """
     Convert milliseconds to IEC_TIMESPEC format (tv_sec, tv_nsec).
 
@@ -151,8 +151,9 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
                         tzinfo=timezone.utc
                     )
                     return dt
-                except (ValueError, OverflowError):
+                except (ValueError, OverflowError) as e:
                     # Invalid time, return today at midnight
+                    log_warn(f"Invalid TOD value (hours={hours}), using midnight: {e}")
                     return datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
             elif isinstance(value, datetime):
                 return value

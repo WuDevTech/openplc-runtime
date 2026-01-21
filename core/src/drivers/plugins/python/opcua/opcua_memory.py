@@ -172,7 +172,7 @@ def write_string_direct(address: int, value: str) -> bool:
         raise RuntimeError(f"String memory write error: {e}")
 
 
-def read_timespec_direct(address: int) -> tuple:
+def read_timespec_direct(address: int) -> tuple[int, int]:
     """
     Read an IEC_TIMESPEC directly from memory.
 
