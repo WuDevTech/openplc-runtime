@@ -12,6 +12,17 @@ except ImportError:
 # Permission types for variables
 PermissionType = Literal["r", "w", "rw"]
 
+# Valid datatypes for OPC-UA variables
+VALID_DATATYPES = frozenset([
+    "BOOL", "BYTE",
+    "INT", "DINT", "LINT", "INT32",
+    "FLOAT", "REAL",
+    "STRING",
+    # TIME-related types (IEC 61131-3)
+    "TIME", "DATE", "TOD", "DT",
+])
+
+
 @dataclass
 class SecurityProfile:
     """Configuration for a security profile/endpoint."""
@@ -453,6 +464,28 @@ class OpcuaMasterConfig(PluginConfigContract):
 
             if len(all_indices) != len(set(all_indices)):
                 raise ValueError(f"Duplicate indices found in plugin '{plugin.name}'")
+
+            # Validate datatypes
+            for var in address_space.variables:
+                if var.datatype.upper() not in VALID_DATATYPES:
+                    raise ValueError(
+                        f"Invalid datatype '{var.datatype}' for variable '{var.node_id}' "
+                        f"in plugin '{plugin.name}'. Valid types: {sorted(VALID_DATATYPES)}"
+                    )
+            for struct in address_space.structures:
+                for field in struct.fields:
+                    if field.datatype.upper() not in VALID_DATATYPES:
+                        raise ValueError(
+                            f"Invalid datatype '{field.datatype}' for field '{field.name}' "
+                            f"in struct '{struct.node_id}' in plugin '{plugin.name}'. "
+                            f"Valid types: {sorted(VALID_DATATYPES)}"
+                        )
+            for arr in address_space.arrays:
+                if arr.datatype.upper() not in VALID_DATATYPES:
+                    raise ValueError(
+                        f"Invalid datatype '{arr.datatype}' for array '{arr.node_id}' "
+                        f"in plugin '{plugin.name}'. Valid types: {sorted(VALID_DATATYPES)}"
+                    )
 
         # Check for duplicate plugin names
         plugin_names = [plugin.name for plugin in self.plugins]

@@ -22,6 +22,9 @@ from opcua_utils import (
     convert_value_for_opcua,
     convert_value_for_plc,
     infer_var_type,
+    timespec_to_milliseconds,
+    milliseconds_to_timespec,
+    TIME_DATATYPES,
 )
 from asyncua import ua
 
@@ -79,6 +82,28 @@ class TestMapPlcToOpcuaType:
         """Unknown types should map to Variant."""
         assert map_plc_to_opcua_type("UNKNOWN") == ua.VariantType.Variant
         assert map_plc_to_opcua_type("CUSTOM") == ua.VariantType.Variant
+
+    # TIME type mappings
+    def test_time_mapping(self):
+        """TIME should map to Int64 (milliseconds)."""
+        assert map_plc_to_opcua_type("TIME") == ua.VariantType.Int64
+        assert map_plc_to_opcua_type("time") == ua.VariantType.Int64
+        assert map_plc_to_opcua_type("Time") == ua.VariantType.Int64
+
+    def test_tod_mapping(self):
+        """TOD (Time of Day) should map to DateTime (current date + time)."""
+        assert map_plc_to_opcua_type("TOD") == ua.VariantType.DateTime
+        assert map_plc_to_opcua_type("tod") == ua.VariantType.DateTime
+
+    def test_date_mapping(self):
+        """DATE should map to DateTime."""
+        assert map_plc_to_opcua_type("DATE") == ua.VariantType.DateTime
+        assert map_plc_to_opcua_type("date") == ua.VariantType.DateTime
+
+    def test_dt_mapping(self):
+        """DT (Date and Time) should map to DateTime."""
+        assert map_plc_to_opcua_type("DT") == ua.VariantType.DateTime
+        assert map_plc_to_opcua_type("dt") == ua.VariantType.DateTime
 
 
 class TestConvertValueForOpcua:
@@ -200,6 +225,54 @@ class TestConvertValueForOpcua:
         """Non-string values should be converted to string."""
         assert convert_value_for_opcua("STRING", 123) == "123"
 
+    # TIME conversions
+    def test_time_from_tuple(self):
+        """TIME from tuple (tv_sec, tv_nsec) should convert to milliseconds."""
+        # 1.5 seconds = 1500 ms
+        assert convert_value_for_opcua("TIME", (1, 500_000_000)) == 1500
+        # 0 seconds
+        assert convert_value_for_opcua("TIME", (0, 0)) == 0
+        # 10.25 seconds = 10250 ms
+        assert convert_value_for_opcua("TIME", (10, 250_000_000)) == 10250
+
+    def test_time_from_int(self):
+        """TIME from int should be treated as already milliseconds."""
+        assert convert_value_for_opcua("TIME", 1500) == 1500
+        assert convert_value_for_opcua("TIME", 0) == 0
+
+    def test_tod_from_tuple(self):
+        """TOD from tuple should convert to DateTime with current date + time."""
+        from datetime import datetime, timezone
+
+        # Capture the date before conversion to avoid flakiness across midnight
+        today_before = datetime.now(timezone.utc).date()
+
+        # 1 hour = 3600 seconds since midnight -> 01:00:00
+        result = convert_value_for_opcua("TOD", (3600, 0))
+        assert isinstance(result, datetime)
+        assert result.hour == 1
+        assert result.minute == 0
+        assert result.second == 0
+        # Date should correspond to the current date at the time of conversion,
+        # allowing for the possibility that midnight passes during the test.
+        today_after = datetime.now(timezone.utc).date()
+        assert today_before <= result.date() <= today_after
+
+        # 1 hour + 30 minutes + 45 seconds = 5445 seconds
+        result2 = convert_value_for_opcua("TOD", (5445, 500_000_000))
+        assert result2.hour == 1
+        assert result2.minute == 30
+        assert result2.second == 45
+        assert result2.microsecond == 500000  # 500ms = 500000 microseconds
+
+    def test_time_large_values(self):
+        """TIME should handle large values (hours/days)."""
+        # 24 hours = 86400 seconds = 86400000 ms
+        assert convert_value_for_opcua("TIME", (86400, 0)) == 86400000
+        # 1 day + 1 hour + 1 minute + 1.5 seconds
+        tv_sec = 86400 + 3600 + 60 + 1
+        assert convert_value_for_opcua("TIME", (tv_sec, 500_000_000)) == (tv_sec * 1000 + 500)
+
 
 class TestConvertValueForPlc:
     """Tests for convert_value_for_plc function."""
@@ -287,6 +360,39 @@ class TestConvertValueForPlc:
         """String values should pass through."""
         assert convert_value_for_plc("STRING", "Hello") == "Hello"
         assert convert_value_for_plc("STRING", "") == ""
+
+    # TIME conversions (OPC-UA milliseconds -> PLC timespec tuple)
+    def test_time_to_tuple(self):
+        """TIME milliseconds should convert to (tv_sec, tv_nsec) tuple."""
+        # 1500 ms = 1.5 seconds
+        assert convert_value_for_plc("TIME", 1500) == (1, 500_000_000)
+        # 0 ms
+        assert convert_value_for_plc("TIME", 0) == (0, 0)
+        # 10250 ms = 10.25 seconds
+        assert convert_value_for_plc("TIME", 10250) == (10, 250_000_000)
+
+    def test_tod_to_tuple(self):
+        """TOD DateTime should convert to (tv_sec, tv_nsec) tuple (seconds since midnight)."""
+        from datetime import datetime, timezone
+
+        # 01:00:00 = 3600 seconds since midnight
+        dt1 = datetime(2025, 6, 15, 1, 0, 0, tzinfo=timezone.utc)
+        assert convert_value_for_plc("TOD", dt1) == (3600, 0)
+
+        # 01:30:45.500000 = 5445 seconds + 500000 microseconds
+        dt2 = datetime(2025, 6, 15, 1, 30, 45, 500000, tzinfo=timezone.utc)
+        result = convert_value_for_plc("TOD", dt2)
+        assert result[0] == 5445  # seconds since midnight
+        assert result[1] == 500_000_000  # nanoseconds
+
+        # Midnight = 0 seconds
+        dt3 = datetime(2025, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
+        assert convert_value_for_plc("TOD", dt3) == (0, 0)
+
+    def test_time_large_values_to_tuple(self):
+        """TIME should handle large milliseconds values."""
+        # 86400000 ms = 24 hours
+        assert convert_value_for_plc("TIME", 86400000) == (86400, 0)
 
 
 class TestInferVarType:
@@ -392,3 +498,107 @@ class TestRoundTripConversions:
             opcua_val = convert_value_for_opcua("STRING", val)
             plc_val = convert_value_for_plc("STRING", opcua_val)
             assert plc_val == val
+
+    def test_time_roundtrip(self):
+        """TIME values should survive round-trip conversion (PLC tuple -> OPC-UA ms -> PLC tuple)."""
+        test_values = [
+            (0, 0),           # Zero
+            (1, 0),           # 1 second
+            (1, 500_000_000), # 1.5 seconds
+            (10, 250_000_000), # 10.25 seconds
+            (3600, 0),        # 1 hour
+            (86400, 0),       # 24 hours
+        ]
+        for tv_sec, tv_nsec in test_values:
+            # Convert PLC tuple to OPC-UA milliseconds
+            opcua_val = convert_value_for_opcua("TIME", (tv_sec, tv_nsec))
+            # Convert back to PLC tuple
+            plc_val = convert_value_for_plc("TIME", opcua_val)
+            # Compare (note: nanosecond precision is truncated to milliseconds)
+            expected_sec = tv_sec
+            expected_nsec = (tv_nsec // 1_000_000) * 1_000_000  # Truncate to ms precision
+            assert plc_val == (expected_sec, expected_nsec)
+
+    def test_tod_roundtrip(self):
+        """TOD values should survive round-trip conversion."""
+        test_values = [
+            (0, 0),           # Midnight
+            (3600, 0),        # 1:00 AM
+            (43200, 0),       # Noon
+            (43200, 500_000_000), # Noon + 500ms
+        ]
+        for tv_sec, tv_nsec in test_values:
+            opcua_val = convert_value_for_opcua("TOD", (tv_sec, tv_nsec))
+            plc_val = convert_value_for_plc("TOD", opcua_val)
+            expected_sec = tv_sec
+            expected_nsec = (tv_nsec // 1_000_000) * 1_000_000
+            assert plc_val == (expected_sec, expected_nsec)
+
+
+class TestTimespecConversionHelpers:
+    """Tests for TIME conversion helper functions."""
+
+    def test_timespec_to_milliseconds_basic(self):
+        """Basic conversion: 1 second = 1000 ms."""
+        assert timespec_to_milliseconds(1, 0) == 1000
+        assert timespec_to_milliseconds(0, 0) == 0
+        assert timespec_to_milliseconds(10, 0) == 10000
+
+    def test_timespec_to_milliseconds_with_nanoseconds(self):
+        """Conversion with nanoseconds: 1.5 sec = 1500 ms."""
+        assert timespec_to_milliseconds(1, 500_000_000) == 1500
+        assert timespec_to_milliseconds(0, 100_000_000) == 100
+        assert timespec_to_milliseconds(2, 750_000_000) == 2750
+
+    def test_timespec_to_milliseconds_truncates_submillisecond(self):
+        """Sub-millisecond nanoseconds should be truncated."""
+        # 999999 ns = 0.999999 ms, should truncate to 0 ms
+        assert timespec_to_milliseconds(0, 999_999) == 0
+        # 1000000 ns = 1 ms
+        assert timespec_to_milliseconds(0, 1_000_000) == 1
+
+    def test_milliseconds_to_timespec_basic(self):
+        """Basic reverse conversion."""
+        assert milliseconds_to_timespec(1000) == (1, 0)
+        assert milliseconds_to_timespec(0) == (0, 0)
+        assert milliseconds_to_timespec(10000) == (10, 0)
+
+    def test_milliseconds_to_timespec_with_remainder(self):
+        """Conversion with fractional seconds."""
+        assert milliseconds_to_timespec(1500) == (1, 500_000_000)
+        assert milliseconds_to_timespec(100) == (0, 100_000_000)
+        assert milliseconds_to_timespec(2750) == (2, 750_000_000)
+
+    def test_roundtrip_conversion(self):
+        """Roundtrip conversion should preserve millisecond precision."""
+        for ms in [0, 1, 100, 999, 1000, 1500, 10000, 86400000]:
+            tv_sec, tv_nsec = milliseconds_to_timespec(ms)
+            result = timespec_to_milliseconds(tv_sec, tv_nsec)
+            assert result == ms
+
+    def test_large_time_values(self):
+        """Large values should work correctly."""
+        # 24 hours in seconds = 86400
+        assert timespec_to_milliseconds(86400, 0) == 86_400_000
+        assert milliseconds_to_timespec(86_400_000) == (86400, 0)
+
+        # 1 week in milliseconds
+        week_ms = 7 * 24 * 60 * 60 * 1000
+        tv_sec, tv_nsec = milliseconds_to_timespec(week_ms)
+        assert tv_sec == 7 * 24 * 60 * 60
+        assert tv_nsec == 0
+
+
+class TestTimeDatatypesConstant:
+    """Tests for TIME_DATATYPES constant."""
+
+    def test_time_datatypes_contains_all_time_types(self):
+        """TIME_DATATYPES should contain all time-related types."""
+        assert "TIME" in TIME_DATATYPES
+        assert "DATE" in TIME_DATATYPES
+        assert "TOD" in TIME_DATATYPES
+        assert "DT" in TIME_DATATYPES
+
+    def test_time_datatypes_is_frozen(self):
+        """TIME_DATATYPES should be immutable."""
+        assert isinstance(TIME_DATATYPES, frozenset)

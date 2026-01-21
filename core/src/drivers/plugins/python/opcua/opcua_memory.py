@@ -24,6 +24,30 @@ STR_MAX_LEN = 126
 STR_LEN_SIZE = 1  # sizeof(__strlen_t) = sizeof(int8_t) = 1
 STRING_TOTAL_SIZE = STR_LEN_SIZE + STR_MAX_LEN  # 127 bytes
 
+# IEC 61131-3 TIME/DATE constants (must match iec_types.h)
+TIMESPEC_SIZE = 8  # sizeof(IEC_TIMESPEC) = 2 * sizeof(int32_t) = 8 bytes
+
+# TIME-related datatypes that use IEC_TIMESPEC structure
+TIME_DATATYPES = frozenset(["TIME", "DATE", "TOD", "DT"])
+
+
+class IEC_TIMESPEC(ctypes.Structure):
+    """
+    ctypes structure matching IEC_TIMESPEC from iec_types.h.
+
+    typedef struct {
+        int32_t tv_sec;   // Seconds
+        int32_t tv_nsec;  // Nanoseconds
+    } IEC_TIMESPEC;
+
+    Used for TIME, DATE, TOD, and DT types.
+    """
+
+    _fields_ = [
+        ("tv_sec", ctypes.c_int32),
+        ("tv_nsec", ctypes.c_int32),
+    ]
+
 
 class IEC_STRING(ctypes.Structure):
     """
@@ -40,16 +64,20 @@ class IEC_STRING(ctypes.Structure):
     ]
 
 
-def read_memory_direct(address: int, size: int) -> Any:
+def read_memory_direct(address: int, size: int, datatype: str = None) -> Any:
     """
     Read value directly from memory using cached address.
 
     Args:
         address: Memory address to read from
         size: Size of the variable in bytes
+        datatype: Optional datatype hint for ambiguous sizes (e.g., TIME vs LINT)
 
     Returns:
-        Value read from memory (int for numeric types, str for STRING)
+        Value read from memory:
+        - int for numeric types
+        - str for STRING
+        - tuple(tv_sec, tv_nsec) for TIME/DATE/TOD/DT
 
     Raises:
         RuntimeError: If memory access fails
@@ -66,6 +94,9 @@ def read_memory_direct(address: int, size: int) -> Any:
             ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint32))
             return ptr.contents.value
         elif size == 8:
+            # Check if this is a TIME-related type
+            if datatype and datatype.upper() in TIME_DATATYPES:
+                return read_timespec_direct(address)
             ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_uint64))
             return ptr.contents.value
         elif size == STRING_TOTAL_SIZE:
@@ -139,6 +170,45 @@ def write_string_direct(address: int, value: str) -> bool:
 
     except Exception as e:
         raise RuntimeError(f"String memory write error: {e}")
+
+
+def read_timespec_direct(address: int) -> tuple:
+    """
+    Read an IEC_TIMESPEC directly from memory.
+
+    Args:
+        address: Memory address of the IEC_TIMESPEC structure
+
+    Returns:
+        Tuple of (tv_sec, tv_nsec)
+    """
+    try:
+        ptr = ctypes.cast(address, ctypes.POINTER(IEC_TIMESPEC))
+        timespec = ptr.contents
+        return (timespec.tv_sec, timespec.tv_nsec)
+    except Exception as e:
+        raise RuntimeError(f"Timespec memory access error: {e}")
+
+
+def write_timespec_direct(address: int, tv_sec: int, tv_nsec: int) -> bool:
+    """
+    Write an IEC_TIMESPEC to memory.
+
+    Args:
+        address: Memory address of the IEC_TIMESPEC structure
+        tv_sec: Seconds value (int32)
+        tv_nsec: Nanoseconds value (int32)
+
+    Returns:
+        True if successful
+    """
+    try:
+        ptr = ctypes.cast(address, ctypes.POINTER(IEC_TIMESPEC))
+        ptr.contents.tv_sec = ctypes.c_int32(tv_sec).value
+        ptr.contents.tv_nsec = ctypes.c_int32(tv_nsec).value
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Timespec memory write error: {e}")
 
 
 def initialize_variable_cache(sba, indices: List[int]) -> Dict[int, VariableMetadata]:

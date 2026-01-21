@@ -34,13 +34,33 @@ if _parent_dir not in sys.path:
 try:
     from .opcua_logging import log_info, log_warn, log_error, log_debug
     from .opcua_types import VariableNode, VariableMetadata
-    from .opcua_utils import map_plc_to_opcua_type, convert_value_for_opcua, convert_value_for_plc
-    from .opcua_memory import read_memory_direct, initialize_variable_cache
+    from .opcua_utils import (
+        map_plc_to_opcua_type,
+        convert_value_for_opcua,
+        convert_value_for_plc,
+        TIME_DATATYPES,
+    )
+    from .opcua_memory import (
+        read_memory_direct,
+        initialize_variable_cache,
+        write_timespec_direct,
+        TIME_DATATYPES as MEM_TIME_DATATYPES,
+    )
 except ImportError:
     from opcua_logging import log_info, log_warn, log_error, log_debug
     from opcua_types import VariableNode, VariableMetadata
-    from opcua_utils import map_plc_to_opcua_type, convert_value_for_opcua, convert_value_for_plc
-    from opcua_memory import read_memory_direct, initialize_variable_cache
+    from opcua_utils import (
+        map_plc_to_opcua_type,
+        convert_value_for_opcua,
+        convert_value_for_plc,
+        TIME_DATATYPES,
+    )
+    from opcua_memory import (
+        read_memory_direct,
+        initialize_variable_cache,
+        write_timespec_direct,
+        TIME_DATATYPES as MEM_TIME_DATATYPES,
+    )
 
 from shared import SafeBufferAccess
 
@@ -247,14 +267,17 @@ class SynchronizationManager:
         Synchronize values from OPC-UA readwrite nodes to PLC runtime.
 
         Only syncs changed values to minimize PLC writes.
+        TIME values are written via direct memory access.
         """
         try:
             if not self._readwrite_nodes:
                 return
 
             # Collect values to write (only changed values)
+            # Separate TIME values (need direct memory access) from regular values
             values_to_write = []
             indices_to_write = []
+            time_writes = []  # List of (var_index, tv_sec, tv_nsec) tuples
 
             for var_index, var_node in self._readwrite_nodes.items():
                 try:
@@ -266,6 +289,8 @@ class SynchronizationManager:
                     if actual_value is None:
                         continue
 
+                    is_time_type = var_node.datatype.upper() in TIME_DATATYPES
+
                     # Check if this is an array node
                     if var_node.array_length and var_node.array_length > 0:
                         # Handle array: value should be a list
@@ -276,8 +301,12 @@ class SynchronizationManager:
 
                                 # Check if element has changed
                                 if self._has_value_changed(elem_index, plc_value):
-                                    values_to_write.append(plc_value)
-                                    indices_to_write.append(elem_index)
+                                    if is_time_type and isinstance(plc_value, tuple):
+                                        tv_sec, tv_nsec = plc_value
+                                        time_writes.append((elem_index, tv_sec, tv_nsec))
+                                    else:
+                                        values_to_write.append(plc_value)
+                                        indices_to_write.append(elem_index)
                                     self.opcua_value_cache[elem_index] = plc_value
                                     log_debug(f"Array element {elem_index} changed: {plc_value}")
                         continue
@@ -287,8 +316,13 @@ class SynchronizationManager:
 
                     # Check if value has changed
                     if self._has_value_changed(var_index, plc_value):
-                        values_to_write.append(plc_value)
-                        indices_to_write.append(var_index)
+                        if is_time_type and isinstance(plc_value, tuple):
+                            # TIME values need direct memory access
+                            tv_sec, tv_nsec = plc_value
+                            time_writes.append((var_index, tv_sec, tv_nsec))
+                        else:
+                            values_to_write.append(plc_value)
+                            indices_to_write.append(var_index)
 
                         # Update cache
                         self.opcua_value_cache[var_index] = plc_value
@@ -301,6 +335,19 @@ class SynchronizationManager:
             # Batch write to PLC if we have changed values
             if values_to_write:
                 await self._write_to_plc_batch(indices_to_write, values_to_write)
+
+            # Write TIME values via direct memory access
+            if time_writes and self._direct_memory_access_enabled:
+                for var_index, tv_sec, tv_nsec in time_writes:
+                    try:
+                        metadata = self.variable_metadata.get(var_index)
+                        if metadata:
+                            write_timespec_direct(metadata.address, tv_sec, tv_nsec)
+                            log_debug(f"TIME variable {var_index} written: ({tv_sec}, {tv_nsec})")
+                        else:
+                            log_warn(f"No metadata for TIME variable {var_index}, skipping write")
+                    except Exception as e:
+                        log_error(f"Failed to write TIME variable {var_index}: {e}")
 
         except Exception as e:
             log_error(f"Error in OPC-UA to runtime sync: {e}")
@@ -331,12 +378,18 @@ class SynchronizationManager:
         """
         for var_index, metadata in self.variable_metadata.items():
             try:
-                # Direct memory read
-                value = read_memory_direct(metadata.address, metadata.size)
-
                 var_node = self.variable_nodes.get(var_index)
-                if var_node:
-                    await self._update_opcua_node(var_node, value)
+                if not var_node:
+                    continue
+
+                # Direct memory read - pass datatype for TIME handling
+                value = read_memory_direct(
+                    metadata.address,
+                    metadata.size,
+                    datatype=var_node.datatype
+                )
+
+                await self._update_opcua_node(var_node, value)
 
             except Exception as e:
                 log_error(f"Direct memory access failed for var {var_index}: {e}")
@@ -447,7 +500,12 @@ class SynchronizationManager:
                 for idx in element_indices:
                     metadata = self.variable_metadata.get(idx)
                     if metadata:
-                        raw_value = read_memory_direct(metadata.address, metadata.size)
+                        # Pass datatype for TIME handling
+                        raw_value = read_memory_direct(
+                            metadata.address,
+                            metadata.size,
+                            datatype=var_node.datatype
+                        )
                         opcua_value = convert_value_for_opcua(var_node.datatype, raw_value)
                         array_values.append(opcua_value)
                     else:
@@ -505,6 +563,8 @@ class SynchronizationManager:
             return 0.0
         elif dtype == "STRING":
             return ""
+        elif dtype in TIME_DATATYPES:
+            return 0  # TIME is represented as milliseconds (Int64) in OPC-UA
         else:
             return 0
 
@@ -558,6 +618,10 @@ class SynchronizationManager:
         # Float comparison with tolerance
         if isinstance(new_value, float) and isinstance(cached_value, float):
             return abs(new_value - cached_value) > 1e-6
+
+        # Tuple comparison for TIME types (tv_sec, tv_nsec)
+        if isinstance(new_value, tuple) and isinstance(cached_value, tuple):
+            return new_value != cached_value
 
         # Exact comparison for other types
         return new_value != cached_value

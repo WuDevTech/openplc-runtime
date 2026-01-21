@@ -139,6 +139,36 @@
             "description": "Example read-only variable",
             "index": 5,
             "permissions": {"viewer": "r", "operator": "r", "engineer": "r"}
+          },
+          {
+            "node_id": "PLC.Example.cycle_time",
+            "browse_name": "cycle_time",
+            "display_name": "Cycle Time",
+            "datatype": "TIME",
+            "initial_value": 0,
+            "description": "PLC scan cycle time (TIME type, represented as milliseconds in OPC-UA)",
+            "index": 6,
+            "permissions": {"viewer": "r", "operator": "r", "engineer": "rw"}
+          },
+          {
+            "node_id": "PLC.Example.timer_preset",
+            "browse_name": "timer_preset",
+            "display_name": "Timer Preset",
+            "datatype": "TIME",
+            "initial_value": 0,
+            "description": "Timer preset value (TIME type)",
+            "index": 7,
+            "permissions": {"viewer": "r", "operator": "rw", "engineer": "rw"}
+          },
+          {
+            "node_id": "PLC.Example.time_of_day",
+            "browse_name": "time_of_day",
+            "display_name": "Time of Day",
+            "datatype": "TOD",
+            "initial_value": 0,
+            "description": "Current time of day (TOD type, mapped to OPC-UA DateTime)",
+            "index": 8,
+            "permissions": {"viewer": "r", "operator": "r", "engineer": "rw"}
           }
         ],
         "structures": [
