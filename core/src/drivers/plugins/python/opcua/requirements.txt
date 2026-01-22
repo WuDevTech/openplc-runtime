@@ -2,8 +2,9 @@
 # Main OPC-UA library for async server implementation
 asyncua==1.1.8
 
-# System monitoring and performance metrics
-psutil==7.2.1
+# System monitoring for network interface detection (optional on MSYS2/Cygwin)
+# The code has socket-based fallbacks when psutil is unavailable (see opcua_endpoints_config.py)
+psutil==7.2.1; sys_platform != 'cygwin'
 
 # Password hashing for user authentication (required for security)
 bcrypt>=4.0.0
