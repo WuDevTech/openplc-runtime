@@ -17,13 +17,103 @@ from typing import Any, Dict, Optional
 from asyncua.crypto.permission_rules import User
 from asyncua.server.user_managers import UserManager, UserRole
 
-# Import bcrypt with fallback
+# Import bcrypt with fallback to PBKDF2 (Python stdlib)
 try:
     import bcrypt
 
     _bcrypt_available = True
 except ImportError:
     _bcrypt_available = False
+
+# PBKDF2 configuration (used when bcrypt is unavailable, e.g., on MSYS2/Cygwin)
+PBKDF2_ITERATIONS = 600000  # OWASP recommendation for SHA256
+PBKDF2_HASH_NAME = "sha256"
+PBKDF2_SALT_LENGTH = 16
+
+
+def _pbkdf2_hash_password(password: str) -> str:
+    """
+    Hash a password using PBKDF2-HMAC-SHA256.
+
+    Format: pbkdf2:sha256:iterations$salt$hash
+    where salt and hash are base64-encoded.
+
+    Args:
+        password: Plain text password
+
+    Returns:
+        PBKDF2 hash string
+    """
+    salt = os.urandom(PBKDF2_SALT_LENGTH)
+    hash_bytes = hashlib.pbkdf2_hmac(
+        PBKDF2_HASH_NAME, password.encode("utf-8"), salt, PBKDF2_ITERATIONS
+    )
+    salt_b64 = base64.b64encode(salt).decode("ascii")
+    hash_b64 = base64.b64encode(hash_bytes).decode("ascii")
+    return f"pbkdf2:{PBKDF2_HASH_NAME}:{PBKDF2_ITERATIONS}${salt_b64}${hash_b64}"
+
+
+def _pbkdf2_verify_password(password: str, password_hash: str) -> bool:
+    """
+    Verify a password against a PBKDF2 hash.
+
+    Args:
+        password: Plain text password
+        password_hash: PBKDF2 hash string (format: pbkdf2:sha256:iterations$salt$hash)
+
+    Returns:
+        True if password matches
+    """
+    try:
+        # Parse the hash format: pbkdf2:sha256:iterations$salt$hash
+        if not password_hash.startswith("pbkdf2:"):
+            return False
+
+        # Split into method part and data part
+        method_part, data_part = password_hash.split("$", 1)
+        # method_part = "pbkdf2:sha256:iterations"
+        # data_part = "salt$hash"
+
+        parts = method_part.split(":")
+        if len(parts) != 3:
+            return False
+
+        _, hash_name, iterations_str = parts
+        iterations = int(iterations_str)
+
+        salt_b64, hash_b64 = data_part.split("$")
+        salt = base64.b64decode(salt_b64)
+        expected_hash = base64.b64decode(hash_b64)
+
+        # Compute hash with same parameters
+        computed_hash = hashlib.pbkdf2_hmac(
+            hash_name, password.encode("utf-8"), salt, iterations
+        )
+
+        # Use constant-time comparison to prevent timing attacks
+        import hmac
+
+        return hmac.compare_digest(computed_hash, expected_hash)
+    except Exception:
+        return False
+
+
+def hash_password(password: str) -> str:
+    """
+    Hash a password using the best available method.
+
+    Uses bcrypt if available (Linux, macOS), falls back to PBKDF2 (MSYS2/Cygwin).
+
+    Args:
+        password: Plain text password
+
+    Returns:
+        Hashed password string
+    """
+    if _bcrypt_available:
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    else:
+        return _pbkdf2_hash_password(password)
 
 # Add directories to path for module access
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -199,10 +289,14 @@ class OpenPLCUserManager(UserManager):
     Custom user manager for OpenPLC authentication.
 
     Supports:
-    - Password authentication (bcrypt hashed)
+    - Password authentication (bcrypt or PBKDF2 hashed)
     - Certificate authentication (fingerprint matching)
     - Anonymous access
     - Brute-force protection with rate limiting
+
+    Password hashing:
+    - bcrypt: Used on Linux/macOS where bcrypt is available
+    - PBKDF2-HMAC-SHA256: Used on MSYS2/Cygwin where bcrypt cannot be built
 
     Maps OpenPLC roles to asyncua UserRole enum:
     - viewer -> UserRole.User (read-only)
@@ -587,22 +681,37 @@ class OpenPLCUserManager(UserManager):
 
     def _validate_password(self, password: str, password_hash: str) -> bool:
         """
-        Validate password against hash using bcrypt or fallback.
+        Validate password against hash using bcrypt or PBKDF2.
+
+        Automatically detects the hash type:
+        - bcrypt hashes start with $2a$, $2b$, or $2y$
+        - PBKDF2 hashes start with pbkdf2:
 
         Args:
             password: Plain text password
-            password_hash: Bcrypt hash
+            password_hash: Bcrypt or PBKDF2 hash
 
         Returns:
             True if password matches
         """
-        if _bcrypt_available:
-            try:
-                return bcrypt.checkpw(password.encode(), password_hash.encode())
-            except Exception as e:
-                log_error(f"bcrypt validation error: {e}")
+        # Detect hash type and validate accordingly
+        if password_hash.startswith("pbkdf2:"):
+            # PBKDF2 hash - use stdlib (works everywhere)
+            return _pbkdf2_verify_password(password, password_hash)
+        elif password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            # bcrypt hash
+            if _bcrypt_available:
+                try:
+                    return bcrypt.checkpw(password.encode(), password_hash.encode())
+                except Exception as e:
+                    log_error(f"bcrypt validation error: {e}")
+                    return False
+            else:
+                log_error(
+                    "bcrypt hash detected but bcrypt not available. "
+                    "Re-hash password with PBKDF2 or install bcrypt."
+                )
                 return False
         else:
-            # Fail securely - bcrypt is required for password authentication
-            log_error("bcrypt not available - password authentication disabled for security")
+            log_error(f"Unknown password hash format: {password_hash[:10]}...")
             return False

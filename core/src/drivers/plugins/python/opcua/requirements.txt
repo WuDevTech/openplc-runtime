@@ -6,8 +6,10 @@ asyncua==1.1.8
 # The code has socket-based fallbacks when psutil is unavailable (see opcua_endpoints_config.py)
 psutil==7.2.1; sys_platform != 'cygwin'
 
-# Password hashing for user authentication (required for security)
-bcrypt>=4.0.0
+# Password hashing for user authentication
+# On MSYS2/Cygwin, bcrypt cannot be built (Rust/pyo3 linking issues).
+# The code falls back to PBKDF2-HMAC-SHA256 (Python stdlib) when bcrypt is unavailable.
+bcrypt>=4.0.0; sys_platform != 'cygwin'
 
 # Core dependencies (automatically installed with asyncua)
 # cryptography>=3.4.8        # For OPC-UA security features
