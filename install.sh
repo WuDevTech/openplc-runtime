@@ -246,8 +246,9 @@ install_deps_msys2() {
     # Update package database (but don't do full system upgrade to avoid breaking frozen bundles)
     pacman -Sy --noconfirm
     # Install required packages
-    # Note: python-cryptography is installed via pacman because pip cannot build Rust-based
-    # packages on MSYS2/Cygwin. Plugin venvs use --system-site-packages to access it.
+    # Note: python-cryptography and mingw-w64-x86_64-python-bcrypt are installed via pacman
+    # because pip cannot build Rust-based packages on MSYS2/Cygwin.
+    # Plugin venvs use --system-site-packages to access these pre-built packages.
     pacman -S --noconfirm --needed \
         base-devel \
         gcc \
@@ -258,6 +259,7 @@ install_deps_msys2() {
         python-pip \
         python-setuptools \
         python-cryptography \
+        mingw-w64-x86_64-python-bcrypt \
         git \
         sqlite3
 }
