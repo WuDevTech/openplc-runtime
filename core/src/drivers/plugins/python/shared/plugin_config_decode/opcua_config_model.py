@@ -482,18 +482,23 @@ class OpcuaMasterConfig(PluginConfigContract):
             def validate_field_datatypes(
                 fields: List[VariableField],
                 struct_node_id: str,
-                plugin_name: str
+                plugin_name: str,
+                path: str = ""
             ) -> None:
                 for field in fields:
+                    # Build full path for better error messages
+                    current_path = f"{path}.{field.name}" if path else field.name
                     if field.fields:
                         # Complex type with nested fields - recurse into children
                         # Don't validate the parent's datatype (e.g., TON, TOF, custom FB)
-                        validate_field_datatypes(field.fields, struct_node_id, plugin_name)
+                        validate_field_datatypes(
+                            field.fields, struct_node_id, plugin_name, current_path
+                        )
                     else:
                         # Leaf field - validate its datatype
-                        if field.datatype.upper() not in VALID_DATATYPES:
+                        if not field.datatype or field.datatype.upper() not in VALID_DATATYPES:
                             raise ValueError(
-                                f"Invalid datatype '{field.datatype}' for field '{field.name}' "
+                                f"Invalid datatype '{field.datatype}' for field '{current_path}' "
                                 f"in struct '{struct_node_id}' in plugin '{plugin_name}'. "
                                 f"Valid types: {sorted(VALID_DATATYPES)}"
                             )
