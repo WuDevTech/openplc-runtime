@@ -91,7 +91,7 @@ create_plugin_venv() {
     
     # Create virtual environment
     # On MSYS2/Cygwin, use --system-site-packages to access pre-built packages like
-    # cryptography that cannot be built from source on this platform
+    # cryptography that cannot be built from source on Windows
     log_info "Creating Python virtual environment at: $venv_path"
     if is_msys2; then
         log_info "MSYS2 detected: using --system-site-packages for pre-built package access"
