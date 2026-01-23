@@ -9,6 +9,18 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENVS_DIR="$PROJECT_ROOT/venvs"
 PLUGINS_DIR="$PROJECT_ROOT/core/src/drivers/plugins/python"
 
+# Detect if running on MSYS2/MinGW/Cygwin (Windows)
+is_msys2() {
+    case "$(uname -s)" in
+        MSYS*|MINGW*|CYGWIN*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -78,8 +90,15 @@ create_plugin_venv() {
     fi
     
     # Create virtual environment
+    # On MSYS2/Cygwin, use --system-site-packages to access pre-built packages like
+    # cryptography that cannot be built from source on this platform
     log_info "Creating Python virtual environment at: $venv_path"
-    python3 -m venv "$venv_path"
+    if is_msys2; then
+        log_info "MSYS2 detected: using --system-site-packages for pre-built package access"
+        python3 -m venv --system-site-packages "$venv_path"
+    else
+        python3 -m venv "$venv_path"
+    fi
     
     # Upgrade pip
     log_info "Upgrading pip..."

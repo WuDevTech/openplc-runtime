@@ -18,6 +18,7 @@
 #include "../plc_app/utils/log.h"
 #include "plugin_config.h"
 #include "plugin_driver.h"
+#include "plugin_utils.h"
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -504,10 +505,19 @@ int plugin_driver_stop(plugin_driver_t *driver)
     // Signal all plugins to stop
     for (int i = 0; i < driver->plugin_count; i++)
     {
+        plugin_instance_t *plugin = &driver->plugins[i];
+        
+        // Skip disabled plugins
+        if (!plugin->config.enabled)
+        {
+            printf("[PLUGIN]: Skipping disabled plugin during stop: %s\n", plugin->config.name);
+            continue;
+        }
+        
         printf("[PLUGIN]: Stopping plugin %d/%d: %s\n", i + 1, driver->plugin_count,
                driver->plugins[i].config.name);
-        if (driver->plugins[i].python_plugin && driver->plugins[i].python_plugin->pFuncStop &&
-            driver->plugins[i].running)
+        if (plugin->python_plugin && plugin->python_plugin->pFuncStop &&
+            plugin->running)
         {
             plugin_instance_t *plugin = &driver->plugins[i];
             if (plugin->config.enabled == 0)
@@ -531,10 +541,9 @@ int plugin_driver_stop(plugin_driver_t *driver)
             plugin->running = 0;
         }
 
-        else if (driver->plugins[i].native_plugin && driver->plugins[i].native_plugin->stop &&
-                 driver->plugins[i].running)
+        else if (plugin->native_plugin && plugin->native_plugin->stop &&
+                 plugin->running)
         {
-            plugin_instance_t *plugin = &driver->plugins[i];
             plugin->native_plugin->stop();
             printf("[PLUGIN]: Native plugin %s stopped successfully.\n", plugin->config.name);
             plugin->running = 0;
@@ -733,6 +742,9 @@ void *generate_structured_args_with_driver(plugin_type_t type, plugin_driver_t *
     // Initialize mutex functions
     args->mutex_take = plugin_mutex_take;
     args->mutex_give = plugin_mutex_give;
+    args->get_var_list = get_var_list;
+    args->get_var_size = get_var_size;
+    args->get_var_count = get_var_count;
     // Set buffer mutex from driver
     args->buffer_mutex = &driver->buffer_mutex;
 
@@ -1143,9 +1155,8 @@ void plugin_driver_cycle_end(plugin_driver_t *driver)
 // Cleanup Python plugin
 static void python_plugin_cleanup(plugin_instance_t *plugin)
 {
-    (void)plugin; // Suppress unused parameter warning
     // Cleanup Python resources
-    if (plugin && plugin->python_plugin)
+    if (plugin && plugin->python_plugin && plugin->config.enabled)
     {
         // Call cleanup function if available
         if (plugin->python_plugin->pFuncCleanup)

@@ -1,3 +1,6 @@
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
 #include <dlfcn.h>
 #include <pthread.h>
 #include <signal.h>
@@ -97,6 +100,15 @@ int main(int argc, char *argv[])
         else
         {
             log_error("[PLUGIN]: Failed to load plugin configuration");
+            // Release the Python GIL if Python was initialized during plugin loading.
+            // This prevents a deadlock where the main thread holds the GIL forever
+            // while sleeping, blocking other threads (like the unix socket thread)
+            // from using Python when handling commands like START.
+            if (Py_IsInitialized())
+            {
+                PyEval_SaveThread();
+                log_info("[PLUGIN]: Released Python GIL after failed plugin load");
+            }
         }
     }
 

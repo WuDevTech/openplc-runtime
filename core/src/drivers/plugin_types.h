@@ -17,6 +17,7 @@
 
 #include "../lib/iec_types.h"
 #include <pthread.h>
+#include <stdint.h>
 
 /**
  * @brief Logging function pointer types
@@ -86,6 +87,11 @@ typedef struct
     int (*mutex_take)(pthread_mutex_t *mutex);
     int (*mutex_give)(pthread_mutex_t *mutex);
     pthread_mutex_t *buffer_mutex;
+
+    /* Variable access functions */
+    void (*get_var_list)(size_t num_vars, size_t *indexes, void **result);
+    size_t (*get_var_size)(size_t idx);
+    uint16_t (*get_var_count)(void);
 
     /* Plugin configuration */
     char plugin_specific_config_file_path[256];
