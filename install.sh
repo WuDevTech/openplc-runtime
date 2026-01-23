@@ -186,7 +186,10 @@ install_deps_apt() {
         gcc \
         make \
         cmake \
-        pkg-config
+        pkg-config \
+        libffi-dev \
+        python3-cffi \
+        python3-cryptography
 }
 
 # For yum-based distros (RHEL 7, CentOS 7, Amazon Linux)
