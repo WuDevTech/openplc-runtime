@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main, development ]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build (comma-separated)'
+        default: 'linux/amd64,linux/arm64,linux/arm/v7'
+        required: false
+        type: string
 
 jobs:
   build:
@@ -36,7 +42,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64,linux/arm/v7' }}
           tags: |
             ghcr.io/autonomy-logic/openplc-runtime:latest
             ghcr.io/autonomy-logic/openplc-runtime:${{ github.sha }}
