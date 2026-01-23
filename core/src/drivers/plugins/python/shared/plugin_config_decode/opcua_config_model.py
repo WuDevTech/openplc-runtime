@@ -12,14 +12,25 @@ except ImportError:
 # Permission types for variables
 PermissionType = Literal["r", "w", "rw"]
 
-# Valid datatypes for OPC-UA variables
+# Valid datatypes for OPC-UA variables (IEC 61131-3 base types)
+# This list must match the base types supported by openplc-editor
 VALID_DATATYPES = frozenset([
-    "BOOL", "BYTE",
-    "INT", "DINT", "LINT", "INT32",
-    "FLOAT", "REAL",
+    # Boolean
+    "BOOL",
+    # Signed integers
+    "SINT", "INT", "DINT", "LINT",
+    # Unsigned integers
+    "USINT", "UINT", "UDINT", "ULINT",
+    # Floating point
+    "REAL", "LREAL",
+    # Bit strings
+    "BYTE", "WORD", "DWORD", "LWORD",
+    # String
     "STRING",
-    # TIME-related types (IEC 61131-3)
+    # Time-related types
     "TIME", "DATE", "TOD", "DT",
+    # Legacy/alternative names (for backward compatibility)
+    "INT32", "FLOAT",
 ])
 
 
@@ -466,6 +477,27 @@ class OpcuaMasterConfig(PluginConfigContract):
                 raise ValueError(f"Duplicate indices found in plugin '{plugin.name}'")
 
             # Validate datatypes
+            # Helper to validate datatypes recursively for nested fields
+            # Only leaf fields (those without nested children) are validated
+            def validate_field_datatypes(
+                fields: List[VariableField],
+                struct_node_id: str,
+                plugin_name: str
+            ) -> None:
+                for field in fields:
+                    if field.fields:
+                        # Complex type with nested fields - recurse into children
+                        # Don't validate the parent's datatype (e.g., TON, TOF, custom FB)
+                        validate_field_datatypes(field.fields, struct_node_id, plugin_name)
+                    else:
+                        # Leaf field - validate its datatype
+                        if field.datatype.upper() not in VALID_DATATYPES:
+                            raise ValueError(
+                                f"Invalid datatype '{field.datatype}' for field '{field.name}' "
+                                f"in struct '{struct_node_id}' in plugin '{plugin_name}'. "
+                                f"Valid types: {sorted(VALID_DATATYPES)}"
+                            )
+
             for var in address_space.variables:
                 if var.datatype.upper() not in VALID_DATATYPES:
                     raise ValueError(
@@ -473,13 +505,7 @@ class OpcuaMasterConfig(PluginConfigContract):
                         f"in plugin '{plugin.name}'. Valid types: {sorted(VALID_DATATYPES)}"
                     )
             for struct in address_space.structures:
-                for field in struct.fields:
-                    if field.datatype.upper() not in VALID_DATATYPES:
-                        raise ValueError(
-                            f"Invalid datatype '{field.datatype}' for field '{field.name}' "
-                            f"in struct '{struct.node_id}' in plugin '{plugin.name}'. "
-                            f"Valid types: {sorted(VALID_DATATYPES)}"
-                        )
+                validate_field_datatypes(struct.fields, struct.node_id, plugin.name)
             for arr in address_space.arrays:
                 if arr.datatype.upper() not in VALID_DATATYPES:
                     raise ValueError(
