@@ -61,7 +61,7 @@ static void (*py_log_error)(const char *fmt, ...);
     } while (0)
 
 // Maximum number of Python function blocks that can be loaded simultaneously
-#define MAX_PYTHON_BLOCKS 32
+#define MAX_PYTHON_BLOCKS 128
 
 // Tracking structure for each Python function block
 typedef struct
