@@ -215,12 +215,7 @@ int unload_plc_program(PluginManager *pm)
             plugin_manager_get_symbol(pm, "python_blocks_cleanup");
         if (python_cleanup)
         {
-            log_info("Calling python_blocks_cleanup()");
             python_cleanup();
-        }
-        else
-        {
-            log_info("python_blocks_cleanup symbol not found (no Python FBs used)");
         }
 
         // Destroy the plugin manager
