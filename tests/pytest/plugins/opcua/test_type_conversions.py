@@ -38,10 +38,30 @@ class TestMapPlcToOpcuaType:
         assert map_plc_to_opcua_type("bool") == ua.VariantType.Boolean
         assert map_plc_to_opcua_type("Bool") == ua.VariantType.Boolean
 
+    def test_sint_mapping(self):
+        """SINT should map to SByte (signed 8-bit integer)."""
+        assert map_plc_to_opcua_type("SINT") == ua.VariantType.SByte
+        assert map_plc_to_opcua_type("sint") == ua.VariantType.SByte
+
+    def test_usint_mapping(self):
+        """USINT should map to Byte (unsigned 8-bit integer)."""
+        assert map_plc_to_opcua_type("USINT") == ua.VariantType.Byte
+        assert map_plc_to_opcua_type("usint") == ua.VariantType.Byte
+
     def test_byte_mapping(self):
         """BYTE should map to Byte."""
         assert map_plc_to_opcua_type("BYTE") == ua.VariantType.Byte
         assert map_plc_to_opcua_type("byte") == ua.VariantType.Byte
+
+    def test_uint_mapping(self):
+        """UINT should map to UInt16 (unsigned 16-bit integer)."""
+        assert map_plc_to_opcua_type("UINT") == ua.VariantType.UInt16
+        assert map_plc_to_opcua_type("uint") == ua.VariantType.UInt16
+
+    def test_word_mapping(self):
+        """WORD should map to UInt16."""
+        assert map_plc_to_opcua_type("WORD") == ua.VariantType.UInt16
+        assert map_plc_to_opcua_type("word") == ua.VariantType.UInt16
 
     def test_int_mapping(self):
         """INT should map to Int16."""
@@ -58,10 +78,30 @@ class TestMapPlcToOpcuaType:
         assert map_plc_to_opcua_type("INT32") == ua.VariantType.Int32
         assert map_plc_to_opcua_type("int32") == ua.VariantType.Int32
 
+    def test_udint_mapping(self):
+        """UDINT should map to UInt32 (unsigned 32-bit integer)."""
+        assert map_plc_to_opcua_type("UDINT") == ua.VariantType.UInt32
+        assert map_plc_to_opcua_type("udint") == ua.VariantType.UInt32
+
+    def test_dword_mapping(self):
+        """DWORD should map to UInt32."""
+        assert map_plc_to_opcua_type("DWORD") == ua.VariantType.UInt32
+        assert map_plc_to_opcua_type("dword") == ua.VariantType.UInt32
+
     def test_lint_mapping(self):
         """LINT should map to Int64."""
         assert map_plc_to_opcua_type("LINT") == ua.VariantType.Int64
         assert map_plc_to_opcua_type("lint") == ua.VariantType.Int64
+
+    def test_ulint_mapping(self):
+        """ULINT should map to UInt64 (unsigned 64-bit integer)."""
+        assert map_plc_to_opcua_type("ULINT") == ua.VariantType.UInt64
+        assert map_plc_to_opcua_type("ulint") == ua.VariantType.UInt64
+
+    def test_lword_mapping(self):
+        """LWORD should map to UInt64."""
+        assert map_plc_to_opcua_type("LWORD") == ua.VariantType.UInt64
+        assert map_plc_to_opcua_type("lword") == ua.VariantType.UInt64
 
     def test_float_mapping(self):
         """FLOAT should map to Float."""
@@ -72,6 +112,11 @@ class TestMapPlcToOpcuaType:
         """REAL should map to Float (IEC 61131-3 REAL = 32-bit float)."""
         assert map_plc_to_opcua_type("REAL") == ua.VariantType.Float
         assert map_plc_to_opcua_type("real") == ua.VariantType.Float
+
+    def test_lreal_mapping(self):
+        """LREAL should map to Double (IEC 61131-3 LREAL = 64-bit float)."""
+        assert map_plc_to_opcua_type("LREAL") == ua.VariantType.Double
+        assert map_plc_to_opcua_type("lreal") == ua.VariantType.Double
 
     def test_string_mapping(self):
         """STRING should map to String."""
@@ -120,6 +165,23 @@ class TestConvertValueForOpcua:
         """False/zero values should convert to False."""
         assert convert_value_for_opcua("BOOL", False) is False
         assert convert_value_for_opcua("BOOL", 0) is False
+
+    # SINT conversions (signed 8-bit integer)
+    def test_sint_normal_values(self):
+        """Normal SINT values should pass through."""
+        assert convert_value_for_opcua("SINT", 0) == 0
+        assert convert_value_for_opcua("SINT", 50) == 50
+        assert convert_value_for_opcua("SINT", -50) == -50
+
+    def test_sint_boundary_values(self):
+        """SINT boundary values should be preserved."""
+        assert convert_value_for_opcua("SINT", 127) == 127
+        assert convert_value_for_opcua("SINT", -128) == -128
+
+    def test_sint_clamping(self):
+        """SINT values outside range should be clamped."""
+        assert convert_value_for_opcua("SINT", 200) == 127
+        assert convert_value_for_opcua("SINT", -200) == -128
 
     # BYTE conversions
     def test_byte_normal_values(self):
@@ -437,6 +499,13 @@ class TestRoundTripConversions:
             opcua_val = convert_value_for_opcua("BOOL", int(val))
             plc_val = convert_value_for_plc("BOOL", opcua_val)
             assert plc_val == int(val)
+
+    def test_sint_roundtrip(self):
+        """SINT values should survive round-trip conversion."""
+        for val in [0, 1, -1, 50, -50, 127, -128]:
+            opcua_val = convert_value_for_opcua("SINT", val)
+            plc_val = convert_value_for_plc("SINT", opcua_val)
+            assert plc_val == val
 
     def test_byte_roundtrip(self):
         """BYTE values should survive round-trip conversion."""
