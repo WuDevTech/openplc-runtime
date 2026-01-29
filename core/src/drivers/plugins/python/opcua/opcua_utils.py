@@ -27,18 +27,33 @@ def map_plc_to_opcua_type(plc_type: str) -> ua.VariantType:
     """Map plc datatype to OPC-UA VariantType."""
     type_mapping = {
         "BOOL": ua.VariantType.Boolean,
-        "BYTE": ua.VariantType.Byte,
-        "INT": ua.VariantType.Int16,
-        "INT32": ua.VariantType.Int32,
-        "DINT": ua.VariantType.Int32,
-        "LINT": ua.VariantType.Int64,
+        # 8-bit types
+        "SINT": ua.VariantType.SByte,   # Signed 8-bit integer
+        "USINT": ua.VariantType.Byte,   # Unsigned 8-bit integer
+        "BYTE": ua.VariantType.Byte,    # Unsigned 8-bit (alias for USINT)
+        # 16-bit types
+        "INT": ua.VariantType.Int16,    # Signed 16-bit integer
+        "UINT": ua.VariantType.UInt16,  # Unsigned 16-bit integer
+        "WORD": ua.VariantType.UInt16,  # Unsigned 16-bit (bit string)
+        # 32-bit types
+        "DINT": ua.VariantType.Int32,   # Signed 32-bit integer
+        "INT32": ua.VariantType.Int32,  # Alias for DINT
+        "UDINT": ua.VariantType.UInt32, # Unsigned 32-bit integer
+        "DWORD": ua.VariantType.UInt32, # Unsigned 32-bit (bit string)
+        # 64-bit types
+        "LINT": ua.VariantType.Int64,   # Signed 64-bit integer
+        "ULINT": ua.VariantType.UInt64, # Unsigned 64-bit integer
+        "LWORD": ua.VariantType.UInt64, # Unsigned 64-bit (bit string)
+        # Floating point types
         "FLOAT": ua.VariantType.Float,
-        "REAL": ua.VariantType.Float,  # IEC 61131-3 REAL = 32-bit float
+        "REAL": ua.VariantType.Float,   # IEC 61131-3 REAL = 32-bit float
+        "LREAL": ua.VariantType.Double, # IEC 61131-3 LREAL = 64-bit float
+        # String type
         "STRING": ua.VariantType.String,
         # TIME-related types
-        "TIME": ua.VariantType.Int64,  # Duration in milliseconds
-        "TOD": ua.VariantType.DateTime,  # Time of day as DateTime (current date + time)
-        "DATE": ua.VariantType.DateTime,  # Date as DateTime (date only, time set to 00:00:00)
+        "TIME": ua.VariantType.Int64,   # Duration in milliseconds
+        "TOD": ua.VariantType.DateTime, # Time of day as DateTime (current date + time)
+        "DATE": ua.VariantType.DateTime, # Date as DateTime (date only, time set to 00:00:00)
         "DT": ua.VariantType.DateTime,  # Date and Time as OPC-UA DateTime
     }
     mapped_type = type_mapping.get(plc_type.upper(), ua.VariantType.Variant)
@@ -79,7 +94,7 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
     # The debug utils return raw integer values based on variable size
     # Convert to appropriate OPC-UA types based on config datatype
     try:
-        if datatype.upper() in ["BOOL", "Bool"]:
+        if datatype.upper() == "BOOL":
             # Ensure BOOL values are proper Python booleans
             if isinstance(value, bool):
                 return value
@@ -88,34 +103,64 @@ def convert_value_for_opcua(datatype: str, value: Any) -> Any:
             else:
                 return bool(value)
         
-        elif datatype.upper() in ["BYTE", "Byte"]:
+        elif datatype.upper() == "SINT":
+            # Ensure proper int8 type for OPC-UA compatibility (signed 8-bit)
+            clamped_value = max(-128, min(127, int(value)))
+            return ctypes.c_int8(clamped_value).value
+
+        elif datatype.upper() in ["BYTE", "USINT"]:
             # Ensure proper uint8 type for OPC-UA compatibility
             return ctypes.c_uint8(max(0, min(255, int(value)))).value
-        
-        elif datatype.upper() in ["INT", "Int"]:
+
+        elif datatype.upper() in ["UINT", "WORD"]:
+            # Ensure proper uint16 type for OPC-UA compatibility
+            clamped_value = max(0, min(65535, int(value)))
+            return ctypes.c_uint16(clamped_value).value
+
+        elif datatype.upper() == "INT":
             # Ensure proper int16 type - critical for OPC-UA compatibility
             clamped_value = max(-32768, min(32767, int(value)))
             return ctypes.c_int16(clamped_value).value
         
-        elif datatype.upper() in ["DINT", "Dint", "INT32", "Int32"]:
+        elif datatype.upper() in ["DINT", "INT32"]:
             # Ensure proper int32 type for OPC-UA compatibility
             clamped_value = max(-2147483648, min(2147483647, int(value)))
             return ctypes.c_int32(clamped_value).value
-        
-        elif datatype.upper() in ["LINT", "Lint"]:
+
+        elif datatype.upper() in ["UDINT", "DWORD"]:
+            # Ensure proper uint32 type for OPC-UA compatibility
+            clamped_value = max(0, min(4294967295, int(value)))
+            return ctypes.c_uint32(clamped_value).value
+
+        elif datatype.upper() == "LINT":
             return int(value)  # int64
-        
+
+        elif datatype.upper() in ["ULINT", "LWORD"]:
+            # Ensure proper uint64 type for OPC-UA compatibility
+            clamped_value = max(0, min(18446744073709551615, int(value)))
+            return ctypes.c_uint64(clamped_value).value
+
         elif datatype.upper() in ["FLOAT", "REAL"]:
             # Float/Real values are stored as integers in debug variables
             # Convert back to float if it's an integer representation
             if isinstance(value, int):
                 try:
                     return struct.unpack('f', struct.pack('I', value))[0]
-                except:
+                except struct.error:
                     return float(value)
             return float(value)
-        
-        elif datatype.upper() in ["STRING", "String"]:
+
+        elif datatype.upper() == "LREAL":
+            # LREAL (64-bit float) values are stored as integers in debug variables
+            # Convert back to double if it's an integer representation
+            if isinstance(value, int):
+                try:
+                    return struct.unpack('d', struct.pack('Q', value))[0]
+                except struct.error:
+                    return float(value)
+            return float(value)
+
+        elif datatype.upper() == "STRING":
             return str(value)
 
         elif datatype.upper() == "TIME":
@@ -219,7 +264,7 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
     """Convert OPC-UA value to PLC debug variable format."""
     # Handle different OPC-UA value types more robustly
     try:
-        if datatype.upper() in ["BOOL", "Bool"]:
+        if datatype.upper() == "BOOL":
             # Convert any value to boolean, then to int (0/1)
             if isinstance(value, bool):
                 return int(value)
@@ -230,34 +275,64 @@ def convert_value_for_plc(datatype: str, value: Any) -> Any:
             else:
                 return int(bool(value))
         
-        elif datatype.upper() in ["BYTE", "Byte"]:
+        elif datatype.upper() == "SINT":
+            # Ensure proper int8 type for PLC compatibility (signed 8-bit)
+            clamped_value = max(-128, min(127, int(value)))
+            return ctypes.c_int8(clamped_value).value
+
+        elif datatype.upper() in ["BYTE", "USINT"]:
             # Ensure proper uint8 type for PLC compatibility
             return ctypes.c_uint8(max(0, min(255, int(value)))).value
-        
-        elif datatype.upper() in ["INT", "Int"]:
-            # Ensure proper int16 type for PLC compatibility  
+
+        elif datatype.upper() == "INT":
+            # Ensure proper int16 type for PLC compatibility
             clamped_value = max(-32768, min(32767, int(value)))
             return ctypes.c_int16(clamped_value).value
-        
-        elif datatype.upper() in ["DINT", "Dint", "INT32", "Int32"]:
+
+        elif datatype.upper() in ["UINT", "WORD"]:
+            # Ensure proper uint16 type for PLC compatibility
+            clamped_value = max(0, min(65535, int(value)))
+            return ctypes.c_uint16(clamped_value).value
+
+        elif datatype.upper() in ["DINT", "INT32"]:
             # Ensure proper int32 type for PLC compatibility
             clamped_value = max(-2147483648, min(2147483647, int(value)))
             return ctypes.c_int32(clamped_value).value
-        
-        elif datatype.upper() in ["LINT", "Lint"]:
+
+        elif datatype.upper() in ["UDINT", "DWORD"]:
+            # Ensure proper uint32 type for PLC compatibility
+            clamped_value = max(0, min(4294967295, int(value)))
+            return ctypes.c_uint32(clamped_value).value
+
+        elif datatype.upper() == "LINT":
             return int(value)  # int64
-        
+
+        elif datatype.upper() in ["ULINT", "LWORD"]:
+            # Ensure proper uint64 type for PLC compatibility
+            clamped_value = max(0, min(18446744073709551615, int(value)))
+            return ctypes.c_uint64(clamped_value).value
+
         elif datatype.upper() in ["FLOAT", "REAL"]:
             # Convert float to int representation for storage
             if isinstance(value, float):
                 try:
                     return struct.unpack('I', struct.pack('f', value))[0]
-                except:
+                except struct.error:
                     return int(value)
             else:
                 return int(float(value))
-        
-        elif datatype.upper() in ["STRING", "String"]:
+
+        elif datatype.upper() == "LREAL":
+            # Convert double to int representation for storage (64-bit)
+            if isinstance(value, float):
+                try:
+                    return struct.unpack('Q', struct.pack('d', value))[0]
+                except struct.error:
+                    return int(value)
+            else:
+                return int(float(value))
+
+        elif datatype.upper() == "STRING":
             return str(value)
 
         elif datatype.upper() == "TIME":
