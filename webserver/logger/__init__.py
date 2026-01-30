@@ -5,10 +5,10 @@ import sys
 from .logger import get_logger
 from .parser import LogParser
 from .bufferhandler import BufferHandler
-from .formatter import JsonFormatter
+from .formatter import JsonFormatter, HumanReadableFormatter
 from .config import LoggerConfig
 
-__all__ = ["get_logger", "LogParser", "BufferHandler", "JsonFormatter"]
+__all__ = ["get_logger", "LogParser", "BufferHandler", "JsonFormatter", "HumanReadableFormatter"]
 __version__ = "0.1"
 __author__ = "Autonomy"
 __license__ = "MIT"
@@ -40,7 +40,7 @@ def get_logger(name="runtime", use_buffer: bool = False):
         for h in logger.handlers
     ):
         stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(JsonFormatter())
+        stream_handler.setFormatter(HumanReadableFormatter())
         logger.addHandler(stream_handler)
 
     # Ensure BufferHandler exists if requested
