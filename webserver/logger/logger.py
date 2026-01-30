@@ -1,7 +1,7 @@
 # logger/logger.py
 import logging
 import sys
-from .formatter import JsonFormatter
+from .formatter import JsonFormatter, HumanReadableFormatter
 from .bufferhandler import BufferHandler
 
 
@@ -16,7 +16,7 @@ def get_logger(name: str = "logger",
     # Always ensure a StreamHandler exists
     if not any(isinstance(h, logging.StreamHandler) for h in collector_logger.handlers):
         stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(JsonFormatter())
+        stream_handler.setFormatter(HumanReadableFormatter())
         collector_logger.addHandler(stream_handler)
 
     buffer_handler = None

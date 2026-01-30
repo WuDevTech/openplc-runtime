@@ -36,12 +36,12 @@ from shared.plugin_config_decode.opcua_config_model import OpcuaConfig
 # Import local modules (use absolute imports for runtime compatibility)
 try:
     # Try relative imports first (when loaded as package)
-    from .opcua_logging import get_logger, log_info, log_warn, log_error
+    from .opcua_logging import get_logger, log_debug, log_error, log_info, log_warn
     from .config import load_config
     from .server import OpcuaServerManager
 except ImportError:
     # Fall back to absolute imports (when loaded directly by runtime)
-    from opcua_logging import get_logger, log_info, log_warn, log_error
+    from opcua_logging import get_logger, log_debug, log_error, log_info, log_warn
     from config import load_config
     from server import OpcuaServerManager
 
@@ -82,7 +82,7 @@ def init(args_capsule) -> bool:
         logging_accessor = SafeLoggingAccess(_runtime_args)
         if logging_accessor.is_valid:
             get_logger().initialize(logging_accessor)
-            log_info("Logging initialized with runtime accessor")
+            log_debug("Logging initialized with runtime accessor")
         
         # Create buffer accessor
         _buffer_accessor = SafeBufferAccess(_runtime_args)
@@ -90,7 +90,7 @@ def init(args_capsule) -> bool:
             log_error(f"Failed to create buffer accessor: {_buffer_accessor.error_msg}")
             return False
         
-        log_info("Buffer accessor created")
+        log_debug("Buffer accessor created")
         
         # Load configuration
         config_path, config_error = _buffer_accessor.get_config_path()
@@ -144,7 +144,7 @@ def start_loop() -> bool:
         )
         _server_thread.start()
         
-        log_info("OPC UA server thread started")
+        log_debug("OPC UA server thread started")
         return True
         
     except Exception as e:
@@ -176,7 +176,7 @@ def stop_loop() -> bool:
             if _server_thread.is_alive():
                 log_warn("Server thread did not stop within timeout")
             else:
-                log_info("Server thread stopped")
+                log_debug("Server thread stopped")
         
         _server_thread = None
         log_info("OPC UA server stopped")
