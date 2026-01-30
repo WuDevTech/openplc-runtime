@@ -6,6 +6,7 @@ from .logger import get_logger
 from .parser import LogParser
 from .bufferhandler import BufferHandler
 from .formatter import JsonFormatter
+from .config import LoggerConfig
 
 __all__ = ["get_logger", "LogParser", "BufferHandler", "JsonFormatter"]
 __version__ = "0.1"
@@ -19,20 +20,38 @@ shared_buffer_handler = BufferHandler()
 formatter = JsonFormatter()
 shared_buffer_handler.setFormatter(formatter)
 
+
+def _get_effective_level():
+    """Return the effective log level based on print_debug config."""
+    return logging.DEBUG if LoggerConfig.print_debug else logging.INFO
+
+
 def get_logger(name="runtime", use_buffer: bool = False):
     """Return a logger that shares the same buffer handler."""
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
+    effective_level = _get_effective_level()
+
     # Always ensure a StreamHandler exists
     if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(JsonFormatter())
+        stream_handler.setLevel(effective_level)
         logger.addHandler(stream_handler)
+    else:
+        # Update existing StreamHandler level
+        for h in logger.handlers:
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, BufferHandler):
+                h.setLevel(effective_level)
 
     if use_buffer:
         if not any(isinstance(h, BufferHandler) for h in logger.handlers):
+            shared_buffer_handler.setLevel(effective_level)
             logger.addHandler(shared_buffer_handler)
+        else:
+            # Update existing BufferHandler level
+            shared_buffer_handler.setLevel(effective_level)
 
     return logger, shared_buffer_handler

@@ -35,18 +35,27 @@ void handle_sigint(int sig)
 
 int main(int argc, char *argv[])
 {
-    // Check for --print-logs argument
+    bool print_debug = false;
+
+    // Check for command line arguments
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "--print-logs") == 0)
         {
             print_logs = true;
-            break;
+        }
+        if (strcmp(argv[i], "--print-debug") == 0)
+        {
+            print_debug = true;
         }
     }
 
     // Initialize logging system
-    log_set_level(LOG_LEVEL_DEBUG);
+    // Only enable debug level logging if --print-debug flag is passed
+    if (print_debug)
+    {
+        log_set_level(LOG_LEVEL_DEBUG);
+    }
 
     if (log_init(LOG_SOCKET_PATH) < 0)
     {

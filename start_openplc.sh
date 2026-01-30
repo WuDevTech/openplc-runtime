@@ -206,5 +206,13 @@ setup_plugin_venvs() {
 setup_plugin_venvs
 setup_runtime_venv
 
+# Parse command line arguments
+PRINT_DEBUG=""
+for arg in "$@"; do
+    if [ "$arg" = "--print-debug" ]; then
+        PRINT_DEBUG="--print-debug"
+    fi
+done
+
 # Start the PLC webserver
-"$OPENPLC_DIR/venvs/runtime/bin/python3" -m "webserver.app"
+"$OPENPLC_DIR/venvs/runtime/bin/python3" -m "webserver.app" $PRINT_DEBUG
