@@ -105,6 +105,15 @@ void *plc_cycle_thread(void *arg)
         log_info("Journal buffer initialized");
     }
 
+    // Start enabled plugins now that image tables are populated.
+    // This is the earliest safe point: ext_glueVars() + image_tables_fill_null_pointers()
+    // have run, so plugins will not encounter NULL buffer pointers.
+    if (plugin_driver)
+    {
+        plugin_driver_start(plugin_driver);
+        log_info("[PLUGIN]: Enabled plugins started");
+    }
+
     // Install signal handlers for crash recovery BEFORE entering the main loop.
     // This allows SIGFPE (e.g. division by zero) and SIGSEGV (e.g. bad array
     // access) in the user's PLC program to be caught and recovered from,
@@ -229,17 +238,15 @@ int load_plc_program(PluginManager *pm)
         pthread_mutex_unlock(&state_mutex);
         log_info("PLC State: INIT");
 
-        // Restart all plugins after successful thread creation
+        // Re-initialize plugins with updated config (e.g. after program re-upload).
+        // Do NOT start plugins here -- they are started later in plc_cycle_thread()
+        // after image tables are populated, ensuring plugins never see NULL buffers.
         if (plugin_driver)
         {
-            log_info("[PLUGIN]: Plugin driver system created");
-            // Load plugin configuration
             if (plugin_driver_update_config(plugin_driver, "./plugins.conf") == 0)
             {
-                // Start plugins
                 plugin_driver_init(plugin_driver);
-                plugin_driver_start(plugin_driver);
-                log_info("[PLUGIN]: Plugin driver system initialized");
+                log_info("[PLUGIN]: Plugins re-initialized with updated config");
             }
             else
             {

@@ -97,6 +97,35 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Initialize plugin driver system BEFORE loading the PLC program.
+    // plc_set_state(RUNNING) triggers load_plc_program() which uses the plugin
+    // driver to update config and re-init plugins, and plc_cycle_thread() calls
+    // plugin_driver_start() after image tables are populated.
+    plugin_driver = plugin_driver_create();
+    if (plugin_driver)
+    {
+        log_info("[PLUGIN]: Plugin driver system created");
+        if (plugin_driver_load_config(plugin_driver, "./plugins.conf") == 0)
+        {
+            plugin_driver_init(plugin_driver);
+            log_info("[PLUGIN]: All plugins initialized (not started)");
+        }
+        else
+        {
+            log_error("[PLUGIN]: Failed to load plugin configuration");
+        }
+
+        // Release the Python GIL if Python was initialized during plugin loading.
+        // This prevents a deadlock where the main thread holds the GIL forever
+        // while sleeping, blocking other threads (like the unix socket thread)
+        // from using Python when handling commands like START.
+        if (Py_IsInitialized())
+        {
+            PyEval_SaveThread();
+            log_info("[PLUGIN]: Released Python GIL");
+        }
+    }
+
     // Start PLC (skip in safe mode to allow program upload without loading the
     // faulty program that may have caused repeated crashes)
     if (safe_mode)
@@ -107,34 +136,6 @@ int main(int argc, char *argv[])
     else if (plc_set_state(PLC_STATE_RUNNING) != true)
     {
         log_error("Failed to set PLC state to RUNNING");
-    }
-
-    // Initialize plugin driver system
-    plugin_driver = plugin_driver_create();
-    if (plugin_driver)
-    {
-        log_info("[PLUGIN]: Plugin driver system created");
-        // Load plugin configuration
-        if (plugin_driver_load_config(plugin_driver, "./plugins.conf") == 0)
-        {
-            // Start plugins
-            plugin_driver_init(plugin_driver);
-            plugin_driver_start(plugin_driver);
-            log_info("[PLUGIN]: Plugin driver system initialized");
-        }
-        else
-        {
-            log_error("[PLUGIN]: Failed to load plugin configuration");
-            // Release the Python GIL if Python was initialized during plugin loading.
-            // This prevents a deadlock where the main thread holds the GIL forever
-            // while sleeping, blocking other threads (like the unix socket thread)
-            // from using Python when handling commands like START.
-            if (Py_IsInitialized())
-            {
-                PyEval_SaveThread();
-                log_info("[PLUGIN]: Released Python GIL after failed plugin load");
-            }
-        }
     }
 
     while (keep_running)

@@ -288,17 +288,14 @@ int plugin_driver_init(plugin_driver_t *driver)
         local_gstate = PyGILState_Ensure();
     }
 
-    // #chamdo a função init de cada plugin aqui
+    // Initialize ALL plugins regardless of enabled flag.
+    // This allows features like EtherCAT slave scanning from the editor
+    // even when the plugin is not enabled for PLC runtime cycling.
+    // The init() contract: set up internal state, parse config, allocate
+    // resources. Do NOT start servers, threads, or read buffer values.
     for (int i = 0; i < driver->plugin_count; i++)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
-
-        // Skip disabled plugins
-        if (!plugin->config.enabled)
-        {
-            log_info("Skipping disabled plugin: %s", plugin->config.name);
-            continue;
-        }
 
         if (plugin->config.type == PLUGIN_TYPE_PYTHON && plugin->python_plugin &&
             plugin->python_plugin->pFuncInit)
@@ -432,13 +429,10 @@ int plugin_driver_start(plugin_driver_t *driver)
                 else
                 {
                     log_info("Plugin %s started successfully", plugin->config.name);
+                    Py_DECREF(res);
+                    plugin->running = 1;
                 }
-                Py_DECREF(
-                    res); // There's no problem in calling DECREF here because it only
-                          // handles the returned object from start_loop, not the function itself
                 PyGILState_Release(local_gil);
-
-                plugin->running = 1;
             }
             else
             {
@@ -453,9 +447,17 @@ int plugin_driver_start(plugin_driver_t *driver)
             // Native plugins run synchronously - call start_loop if available
             if (plugin->native_plugin && plugin->native_plugin->start)
             {
-                plugin->native_plugin->start();
-                log_info("Native plugin %s started successfully", plugin->config.name);
-                plugin->running = 1;
+                int result = plugin->native_plugin->start();
+                if (result == 0)
+                {
+                    log_info("Native plugin %s started successfully", plugin->config.name);
+                    plugin->running = 1;
+                }
+                else
+                {
+                    log_error("Native plugin %s failed to start (returned %d)",
+                              plugin->config.name, result);
+                }
             }
             else
             {
@@ -496,31 +498,23 @@ int plugin_driver_stop(plugin_driver_t *driver)
         local_gstate = PyGILState_Ensure();
     }
 
-    // Signal all plugins to stop
+    // Stop all running plugins.
+    // Use the running flag (not enabled) because a plugin may have been
+    // disabled via config update while still running.
     for (int i = 0; i < driver->plugin_count; i++)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
-        
-        // Skip disabled plugins
-        if (!plugin->config.enabled)
+
+        if (!plugin->running)
         {
-            log_info("Skipping disabled plugin during stop: %s", plugin->config.name);
             continue;
         }
-        
-        log_info("Stopping plugin %d/%d: %s", i + 1, driver->plugin_count,
-                 driver->plugins[i].config.name);
-        if (plugin->python_plugin && plugin->python_plugin->pFuncStop &&
-            plugin->running)
-        {
-            plugin_instance_t *plugin = &driver->plugins[i];
-            if (plugin->config.enabled == 0)
-            {
-                log_info("Plugin %s is disabled, skipping stop", plugin->config.name);
-                continue;
-            }
 
-            PyObject *res = PyObject_CallNoArgs(driver->plugins[i].python_plugin->pFuncStop);
+        log_info("Stopping plugin %d/%d: %s", i + 1, driver->plugin_count,
+                 plugin->config.name);
+        if (plugin->python_plugin && plugin->python_plugin->pFuncStop)
+        {
+            PyObject *res = PyObject_CallNoArgs(plugin->python_plugin->pFuncStop);
             if (!res)
             {
                 PyErr_Print();
@@ -529,20 +523,16 @@ int plugin_driver_stop(plugin_driver_t *driver)
             else
             {
                 log_info("Plugin %s stopped successfully", plugin->config.name);
+                Py_DECREF(res);
             }
-            Py_DECREF(res);
-            log_info("Plugin %s stopped", driver->plugins[i].config.name);
             plugin->running = 0;
         }
-
-        else if (plugin->native_plugin && plugin->native_plugin->stop &&
-                 plugin->running)
+        else if (plugin->native_plugin && plugin->native_plugin->stop)
         {
             plugin->native_plugin->stop();
             log_info("Native plugin %s stopped successfully", plugin->config.name);
             plugin->running = 0;
         }
-        // Plugin manager only handles destruction, not stopping
     }
 
     if (need_gil)
@@ -550,64 +540,6 @@ int plugin_driver_stop(plugin_driver_t *driver)
         PyGILState_Release(local_gstate);
     }
 
-    return 0;
-}
-
-int plugin_driver_restart(plugin_driver_t *driver)
-{
-    if (!driver)
-    {
-        return -1;
-    }
-
-    log_info("Restarting all plugins...");
-
-    // Stop all running plugins first
-    if (plugin_driver_stop(driver) != 0)
-    {
-        log_error("Failed to stop plugins during restart");
-        return -1;
-    }
-
-    // Clean up plugins without destroying the driver
-    // Note: No need for GIL here as stop() already handled Python operations
-    if (has_python_plugin && Py_IsInitialized())
-    {
-        gstate = PyGILState_Ensure();
-        for (int i = 0; i < driver->plugin_count; i++)
-        {
-            plugin_instance_t *plugin = &driver->plugins[i];
-            if (plugin->python_plugin)
-            {
-                python_plugin_cleanup(plugin);
-            }
-        }
-        PyGILState_Release(gstate);
-    }
-
-    // CRITICAL: Reload configuration from plugins.conf file
-    log_info("Reloading plugin configuration...");
-    if (plugin_driver_load_config(driver, "plugins.conf") != 0)
-    {
-        log_error("Failed to reload plugin configuration during restart");
-        return -1;
-    }
-
-    // Reinitialize all plugins (only enabled ones)
-    if (plugin_driver_init(driver) != 0)
-    {
-        log_error("Failed to reinitialize plugins during restart");
-        return -1;
-    }
-
-    // Restart all plugins (only enabled ones)
-    if (plugin_driver_start(driver) != 0)
-    {
-        log_error("Failed to start plugins during restart");
-        return -1;
-    }
-
-    log_info("All plugins restarted successfully");
     return 0;
 }
 
@@ -1095,8 +1027,8 @@ void plugin_driver_cycle_start(plugin_driver_t *driver)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
 
-        // Skip disabled or non-running plugins
-        if (!plugin->config.enabled || !plugin->running)
+        // Skip non-running plugins
+        if (!plugin->running)
         {
             continue;
         }
@@ -1124,8 +1056,8 @@ void plugin_driver_cycle_end(plugin_driver_t *driver)
     {
         plugin_instance_t *plugin = &driver->plugins[i];
 
-        // Skip disabled or non-running plugins
-        if (!plugin->config.enabled || !plugin->running)
+        // Skip non-running plugins
+        if (!plugin->running)
         {
             continue;
         }
@@ -1143,7 +1075,7 @@ void plugin_driver_cycle_end(plugin_driver_t *driver)
 static void python_plugin_cleanup(plugin_instance_t *plugin)
 {
     // Cleanup Python resources
-    if (plugin && plugin->python_plugin && plugin->config.enabled)
+    if (plugin && plugin->python_plugin)
     {
         // Call cleanup function if available
         if (plugin->python_plugin->pFuncCleanup)
@@ -1157,8 +1089,8 @@ static void python_plugin_cleanup(plugin_instance_t *plugin)
             else
             {
                 log_info("Plugin %s cleaned up successfully", plugin->config.name);
+                Py_DECREF(res);
             }
-            Py_DECREF(res);
         }
 
         // Decrement references to Python objects
