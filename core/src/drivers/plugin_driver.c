@@ -430,10 +430,9 @@ int plugin_driver_start(plugin_driver_t *driver)
                 {
                     log_info("Plugin %s started successfully", plugin->config.name);
                     Py_DECREF(res);
+                    plugin->running = 1;
                 }
                 PyGILState_Release(local_gil);
-
-                plugin->running = 1;
             }
             else
             {
