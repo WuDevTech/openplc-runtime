@@ -322,11 +322,8 @@ static int register_all_areas(void)
  */
 extern "C" int init(void *args)
 {
-    /* Initialize logger first (before we have runtime_args) */
-    plugin_logger_init(&g_logger, "S7COMM", NULL);
-    plugin_logger_info(&g_logger, "Initializing S7Comm plugin (journal-buffered)...");
-
     if (!args) {
+        plugin_logger_init(&g_logger, "S7COMM", NULL);
         plugin_logger_error(&g_logger, "init args is NULL");
         return -1;
     }
@@ -334,8 +331,9 @@ extern "C" int init(void *args)
     /* Copy runtime args (critical - pointer is freed after init returns) */
     memcpy(&g_runtime_args, args, sizeof(plugin_runtime_args_t));
 
-    /* Re-initialize logger with runtime_args for central logging */
+    /* Initialize logger with runtime_args for central logging */
     plugin_logger_init(&g_logger, "S7COMM", args);
+    plugin_logger_info(&g_logger, "Initializing S7Comm plugin...");
 
     plugin_logger_info(&g_logger, "Buffer size: %d", g_runtime_args.buffer_size);
 
