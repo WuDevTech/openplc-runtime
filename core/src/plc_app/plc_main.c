@@ -36,6 +36,7 @@ void handle_sigint(int sig)
 int main(int argc, char *argv[])
 {
     bool print_debug = false;
+    bool safe_mode   = false;
 
     // Check for command line arguments
     for (int i = 1; i < argc; i++)
@@ -48,11 +49,9 @@ int main(int argc, char *argv[])
         {
             print_debug = true;
         }
-
-        // Early exit if both flags are found
-        if (print_logs && print_debug)
+        else if (strcmp(argv[i], "--safe-mode") == 0)
         {
-            break;
+            safe_mode = true;
         }
     }
 
@@ -98,8 +97,14 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    // Start PLC
-    if (plc_set_state(PLC_STATE_RUNNING) != true)
+    // Start PLC (skip in safe mode to allow program upload without loading the
+    // faulty program that may have caused repeated crashes)
+    if (safe_mode)
+    {
+        log_info("Runtime started in SAFE MODE - PLC program will not be loaded");
+        log_info("Upload a corrected program to recover");
+    }
+    else if (plc_set_state(PLC_STATE_RUNNING) != true)
     {
         log_error("Failed to set PLC state to RUNNING");
     }

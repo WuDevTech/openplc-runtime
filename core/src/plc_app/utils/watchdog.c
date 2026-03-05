@@ -30,14 +30,23 @@ void *watchdog_thread(void *arg)
         long now = atomic_load(&plc_heartbeat);
         if (now == last)
         {
-            // Use stderr to ensure visibility and avoid lockups in log system
-            time_t now_time = time(NULL);
-            struct tm t;
-            gmtime_r(&now_time, &t);
-            char time_buf[20];
-            strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &t);
-            fprintf(stderr, "[%s] [ERROR] Watchdog: No heartbeat! PLC unresponsive.\n", time_buf);
-            exit(EXIT_FAILURE);
+            log_error("Watchdog: No heartbeat detected - PLC program is unresponsive");
+            log_error("The loaded PLC program may contain an infinite loop. "
+                      "Upload a corrected program to recover.");
+
+            // Transition to ERROR state instead of killing the process.
+            // This keeps the runtime alive so the webserver can still
+            // communicate with it and upload a new program.
+            // Writing directly to plc_state is safe here because the PLC
+            // thread is unresponsive (stuck) and not contending the variable.
+            // The main loop checks plc_state each cycle and will exit.
+            plc_state = PLC_STATE_ERROR;
+            log_info("PLC State: ERROR");
+
+            // Reset heartbeat tracking for next run
+            last = 0;
+            atomic_store(&plc_heartbeat, 0);
+            continue;
         }
 
         last = now;

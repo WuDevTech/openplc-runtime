@@ -32,4 +32,10 @@ bool plc_set_state(PLCState new_state);
  */
 void plc_state_manager_cleanup(void);
 
+/**
+ * @brief Get the signal number that caused the last PLC crash.
+ * @return The signal number (e.g. SIGFPE, SIGSEGV), or 0 if no crash occurred
+ */
+int plc_get_crash_signal(void);
+
 #endif // PLC_STATE_MANAGER_H
