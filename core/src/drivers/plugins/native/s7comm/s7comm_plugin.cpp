@@ -339,6 +339,20 @@ extern "C" int init(void *args)
 
     plugin_logger_info(&g_logger, "Buffer size: %d", g_runtime_args.buffer_size);
 
+    g_initialized = true;
+    return 0;
+}
+
+/**
+ * @brief Start the S7 server
+ */
+extern "C" void start_loop(void)
+{
+    if (!g_initialized) {
+        plugin_logger_error(&g_logger, "Cannot start - plugin not initialized");
+        return;
+    }
+
     /* Parse configuration file */
     const char *config_path = g_runtime_args.plugin_specific_config_file_path;
     if (config_path == NULL || config_path[0] == '\0') {
@@ -360,8 +374,12 @@ extern "C" int init(void *args)
     /* Check if server is enabled */
     if (!g_config.enabled) {
         plugin_logger_info(&g_logger, "S7Comm server is disabled in configuration");
-        g_initialized = true;
-        return 0;
+        return;
+    }
+
+    if (g_running) {
+        plugin_logger_warn(&g_logger, "Server already running");
+        return;
     }
 
     /* Log configuration summary */
@@ -374,7 +392,7 @@ extern "C" int init(void *args)
     if (allocate_buffers() != 0) {
         plugin_logger_error(&g_logger, "Failed to allocate buffers");
         free_buffers();
-        return -1;
+        return;
     }
 
     /* Create Snap7 server */
@@ -382,7 +400,7 @@ extern "C" int init(void *args)
     if (g_server == 0) {
         plugin_logger_error(&g_logger, "Failed to create Snap7 server");
         free_buffers();
-        return -1;
+        return;
     }
 
     /* Configure server parameters from config */
@@ -425,8 +443,7 @@ extern "C" int init(void *args)
     /* Register all S7 areas with the server */
     register_all_areas();
 
-    g_initialized = true;
-    plugin_logger_info(&g_logger, "S7Comm plugin initialized successfully (journal-buffered mode)");
+    plugin_logger_info(&g_logger, "S7Comm plugin setup complete (journal-buffered mode)");
 
     /* Log registered areas summary */
     if (g_pe_runtime.enabled) {
@@ -453,29 +470,6 @@ extern "C" int init(void *args)
                           g_db_runtime[i].size_bytes,
                           s7comm_buffer_type_name(g_db_runtime[i].type),
                           g_db_runtime[i].start_buffer);
-    }
-
-    return 0;
-}
-
-/**
- * @brief Start the S7 server
- */
-extern "C" void start_loop(void)
-{
-    if (!g_initialized) {
-        plugin_logger_error(&g_logger, "Cannot start - plugin not initialized");
-        return;
-    }
-
-    if (!g_config.enabled) {
-        plugin_logger_info(&g_logger, "S7 server disabled in configuration");
-        return;
-    }
-
-    if (g_running) {
-        plugin_logger_warn(&g_logger, "Server already running");
-        return;
     }
 
     plugin_logger_info(&g_logger, "Starting S7 server on %s:%d...",
