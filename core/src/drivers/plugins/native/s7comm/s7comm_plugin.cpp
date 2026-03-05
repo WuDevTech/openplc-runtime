@@ -344,11 +344,11 @@ extern "C" int init(void *args)
 /**
  * @brief Start the S7 server
  */
-extern "C" void start_loop(void)
+extern "C" int start_loop(void)
 {
     if (!g_initialized) {
         plugin_logger_error(&g_logger, "Cannot start - plugin not initialized");
-        return;
+        return -1;
     }
 
     /* Parse configuration file */
@@ -372,12 +372,12 @@ extern "C" void start_loop(void)
     /* Check if server is enabled */
     if (!g_config.enabled) {
         plugin_logger_info(&g_logger, "S7Comm server is disabled in configuration");
-        return;
+        return 0;
     }
 
     if (g_running) {
         plugin_logger_warn(&g_logger, "Server already running");
-        return;
+        return 0;
     }
 
     /* Log configuration summary */
@@ -390,7 +390,7 @@ extern "C" void start_loop(void)
     if (allocate_buffers() != 0) {
         plugin_logger_error(&g_logger, "Failed to allocate buffers");
         free_buffers();
-        return;
+        return -1;
     }
 
     /* Create Snap7 server */
@@ -398,7 +398,7 @@ extern "C" void start_loop(void)
     if (g_server == 0) {
         plugin_logger_error(&g_logger, "Failed to create Snap7 server");
         free_buffers();
-        return;
+        return -1;
     }
 
     /* Configure server parameters from config */
@@ -486,11 +486,12 @@ extern "C" void start_loop(void)
         if (g_config.port < 1024) {
             plugin_logger_error(&g_logger, "Note: Port %d requires root privileges on Linux", g_config.port);
         }
-        return;
+        return -1;
     }
 
     g_running = true;
     plugin_logger_info(&g_logger, "S7 server started successfully");
+    return 0;
 }
 
 /**

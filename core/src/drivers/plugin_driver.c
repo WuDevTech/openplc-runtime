@@ -447,9 +447,17 @@ int plugin_driver_start(plugin_driver_t *driver)
             // Native plugins run synchronously - call start_loop if available
             if (plugin->native_plugin && plugin->native_plugin->start)
             {
-                plugin->native_plugin->start();
-                log_info("Native plugin %s started successfully", plugin->config.name);
-                plugin->running = 1;
+                int result = plugin->native_plugin->start();
+                if (result == 0)
+                {
+                    log_info("Native plugin %s started successfully", plugin->config.name);
+                    plugin->running = 1;
+                }
+                else
+                {
+                    log_error("Native plugin %s failed to start (returned %d)",
+                              plugin->config.name, result);
+                }
             }
             else
             {

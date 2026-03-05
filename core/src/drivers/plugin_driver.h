@@ -16,7 +16,7 @@ typedef enum
 } plugin_type_t;
 
 typedef int (*plugin_init_func_t)(void *);
-typedef void (*plugin_start_loop_func_t)(void);
+typedef int (*plugin_start_loop_func_t)(void);
 typedef void (*plugin_stop_loop_func_t)(void);
 typedef void (*plugin_cycle_start_func_t)(void);
 typedef void (*plugin_cycle_end_func_t)(void);
